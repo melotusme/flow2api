@@ -80,20 +80,23 @@ impl BrowserPool {
         uuid::Uuid::parse_str(id).context("账号 ID 无效")?;
         let existing = self.sessions.lock().await.get(id).cloned();
         if let Some(session) = existing {
-            if session.lock().await.child.try_wait()?.is_none() {
+            if session.lock().await.reusable().await {
                 return Ok(session.clone());
             }
         }
         let mut sessions = self.sessions.lock().await;
         // A concurrent first login may have launched this account while we waited.
         if let Some(session) = sessions.get(id) {
-            if session.lock().await.child.try_wait()?.is_none() {
+            if session.lock().await.reusable().await {
                 return Ok(session.clone());
             }
         }
-        let session = Arc::new(Mutex::new(
-            Session::launch(&executable(configured)?, &self.root.join(id), proxy).await?,
-        ));
+        let mut launched =
+            Session::launch(&executable(configured)?, &self.root.join(id), proxy).await?;
+        launched
+            .navigate("https://flow.google.com/projects")
+            .await?;
+        let session = Arc::new(Mutex::new(launched));
         sessions.insert(id.into(), session.clone());
         Ok(session)
     }
@@ -191,8 +194,22 @@ impl Session {
                 json!({"source":include_str!("../assets/recaptcha-hook.js")}),
             )
             .await?;
-        session.navigate("https://flow.google.com/projects").await?;
         Ok(session)
+    }
+    async fn reusable(&mut self) -> bool {
+        if !matches!(self.child.try_wait(), Ok(None)) {
+            return false;
+        }
+        // A Chrome process can outlive the page or its debugging socket. Probe before
+        // admitting a new operation; never retry a generation whose result is unknown.
+        if matches!(
+            timeout(Duration::from_secs(4), self.evaluate("true")).await,
+            Ok(Ok(Value::Bool(true)))
+        ) {
+            return true;
+        }
+        self.close().await;
+        false
     }
     pub async fn call(&mut self, method: &str, params: Value) -> Result<Value> {
         self.sequence += 1;
@@ -297,12 +314,51 @@ impl Session {
         self.evaluate(&format!(r#"(async()=>{{const i={input};const r=await fetch(i.url,{{method:i.method,credentials:'include',headers:{{'Content-Type':i.content_type,'x-same-domain':'1'}},...(i.body===null?{{}}:{{body:i.body}}),signal:AbortSignal.timeout(90000)}});return {{status:r.status,text:await r.text()}}}})()"#)).await
     }
     pub async fn close(&mut self) {
-        let _ = self.call("Browser.close", json!({})).await;
+        let _ = timeout(
+            Duration::from_secs(2),
+            self.call("Browser.close", json!({})),
+        )
+        .await;
         if timeout(Duration::from_secs(5), self.child.wait())
             .await
             .is_err()
         {
             let _ = self.child.kill().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    #[ignore = "launches a dedicated local Chrome; requires Google Chrome"]
+    async fn browser_transport_detects_closed_page_and_releases_profile() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let executable = executable("")?;
+        let profile = directory.path().join("专用 Chrome profile");
+        let mut session = Session::launch(&executable, &profile, "").await?;
+        assert!(session.reusable().await);
+        let app = crate::App::open(&directory.path().join("app-data"))?;
+        let mut account = crate::model::Account {
+            id: uuid::Uuid::new_v4().to_string(),
+            email: "not-logged-in@example.test".into(),
+            enabled: true,
+            project_id: String::new(),
+            last_synced: Some(crate::model::now()),
+            credits: None,
+        };
+        app.store.save_account(&account)?;
+        assert!(app.verify_login(&mut session, &mut account).await.is_err());
+        assert!(app.store.account(&account.id)?.last_synced.is_none());
+        assert!(app.status().browser.contains("需要重新登录同步"));
+        session.socket.close(None).await?;
+        assert!(!session.reusable().await);
+        assert!(session.child.try_wait()?.is_some());
+        let mut reopened = Session::launch(&executable, &profile, "").await?;
+        assert!(reopened.reusable().await);
+        reopened.close().await;
+        assert!(reopened.child.try_wait()?.is_some());
+        Ok(())
     }
 }

@@ -32,7 +32,19 @@ rtk proxy curl -fsS http://127.0.0.1:8000/health
 - macOS：菜单栏图标，任务执行时附带任务数量，菜单项目与 Windows 相同。
 - 执行中显示 Windows 任务栏／macOS Dock 不确定进度；macOS Dock 同步任务数量角标。上游没有可靠百分比时不猜测完成进度。
 - 关闭窗口隐藏窗口并继续运行；从菜单显式退出。存在未完成任务时拒绝退出，避免静默中断。
+- 重复启动唤起已有窗口，避免用户重复双击产生数据库锁错误；使用官方 Tauri 单实例插件，macOS 已实测。
 - 状态来自实际 Rust HTTP 监听器与持久化任务记录，不依据 UI 按钮点击推测。
+
+## Chrome 与账号恢复
+
+- 每次复用 Chrome 会话前探测调试连接，页面／连接已关闭时结束旧会话并从原资料目录重新启动，保留 Chrome 自己维护的登录资料。
+- 恢复发生在新操作开始前，已提交且结果未知的生成不会自动重试。
+- 账号校验失败会取消其可用状态，在账号页重新登录同步后再参与分配。自动分配优先空闲账号，同等负载下选择最久未使用的账号。
+- 以下显式测试会打开临时专用 Chrome，验证中文与空格资料路径、失效登录状态、断开连接和原资料重新打开；不访问 Google、不进行真实生成：
+
+```bash
+rtk proxy cargo test --manifest-path desktop/Cargo.toml -p flow2api-core browser_transport_detects_closed_page_and_releases_profile -- --ignored --nocapture
+```
 
 ## 构建安装包
 

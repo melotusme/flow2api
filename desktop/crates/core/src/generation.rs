@@ -29,11 +29,34 @@ pub fn validate(request: &GenerationRequest) -> Result<Value> {
 }
 
 impl App {
+    pub(crate) async fn verify_login(
+        &self,
+        session: &mut Session,
+        account: &mut Account,
+    ) -> Result<()> {
+        if let Err(error) = session.verify_account(&account.email).await {
+            // A historical sync must not keep an expired or mismatched account eligible.
+            account.last_synced = None;
+            self.store.save_account(account)?;
+            self.change_status(|s| {
+                s.browser = format!("{} 需要重新登录同步", account.email);
+                s.last_error = Some(error.to_string());
+            });
+            return Err(error);
+        }
+        Ok(())
+    }
     pub async fn open_login(&self, id: &str) -> Result<()> {
         self.store.account(id)?;
         let settings = self.store.settings()?;
-        self.browsers
+        let session = self
+            .browsers
             .session(id, &settings.browser_executable, &settings.proxy_url)
+            .await?;
+        session
+            .lock()
+            .await
+            .call("Page.bringToFront", json!({}))
             .await?;
         self.change_status(|s| s.browser = "Chrome 已打开，等待登录／同步".into());
         Ok(())
@@ -46,7 +69,7 @@ impl App {
             .session(id, &settings.browser_executable, &settings.proxy_url)
             .await?;
         let mut session = session.lock().await;
-        session.verify_account(&account.email).await?;
+        self.verify_login(&mut session, &mut account).await?;
         let credits = flow::rpc(&mut session, "nzlxg", json!([]), None).await?;
         account.credits = credits
             .as_array()
@@ -79,15 +102,7 @@ impl App {
                 accounts
                     .into_iter()
                     .filter(|a| a.enabled && a.last_synced.is_some())
-                    .min_by_key(|a| {
-                        tasks
-                            .iter()
-                            .filter(|t| {
-                                ["running", "queued"].contains(&t.state.as_str())
-                                    && t.request.account_id.as_deref() == Some(&a.id)
-                            })
-                            .count()
-                    })
+                    .min_by_key(|a| account_load(a, &tasks))
             }
         }
         .context("没有已启用且完成登录同步的账号")?;
@@ -178,7 +193,7 @@ impl App {
             )
             .await?;
         let mut session = session.lock().await;
-        session.verify_account(&account.email).await?;
+        self.verify_login(&mut session, &mut account).await?;
         if account.project_id.is_empty() {
             self.stage(&task.id, "创建 Flow 项目")?;
             let payload = flow::rpc(
@@ -472,6 +487,22 @@ impl App {
     }
 }
 
+fn account_load(account: &Account, tasks: &[Task]) -> (usize, String) {
+    let assigned = tasks
+        .iter()
+        .filter(|t| t.request.account_id.as_deref() == Some(&account.id));
+    let busy = assigned
+        .clone()
+        .filter(|t| ["running", "queued"].contains(&t.state.as_str()))
+        .count();
+    let last_used = assigned
+        .map(|t| t.created_at.as_str())
+        .max()
+        .unwrap_or_default()
+        .to_owned();
+    (busy, last_used)
+}
+
 fn encoded_image(value: &Value) -> Option<Vec<u8>> {
     match value {
         Value::String(text) if text.len() <= 128 * 1024 * 1024 => {
@@ -576,6 +607,39 @@ pub fn media_extension(bytes: &[u8], kind: &str) -> Result<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn accounts_prefer_free_then_least_recently_used() {
+        let account = |id: &str| Account {
+            id: id.into(),
+            email: format!("{id}@example.test"),
+            enabled: true,
+            project_id: String::new(),
+            last_synced: Some(now()),
+            credits: None,
+        };
+        let first = account("first");
+        let second = account("second");
+        let mut task = Task {
+            id: "job".into(),
+            request: GenerationRequest {
+                model: String::new(),
+                prompt: String::new(),
+                images: vec![],
+                account_id: Some(first.id.clone()),
+                video_id: None,
+            },
+            state: "succeeded".into(),
+            stage: String::new(),
+            created_at: now(),
+            updated_at: now(),
+            error: None,
+            results: vec![],
+        };
+        assert!(account_load(&second, &[task.clone()]) < account_load(&first, &[task.clone()]));
+        task.state = "running".into();
+        assert_eq!(account_load(&first, &[task.clone()]).0, 1);
+        assert!(account_load(&second, &[task.clone()]) < account_load(&first, &[task]));
+    }
     #[tokio::test]
     async fn upscale_encoded_image_is_validated_and_archived() -> Result<()> {
         let bytes = b"\x89PNG\r\n\x1a\nfixture";

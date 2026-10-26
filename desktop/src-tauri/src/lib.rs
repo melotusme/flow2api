@@ -198,6 +198,9 @@ fn icon(status: &Status) -> tauri::image::Image<'static> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let core = App::open(&app.path().app_data_dir()?)?;
