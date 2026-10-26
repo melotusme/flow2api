@@ -9,6 +9,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 struct Desktop {
@@ -116,6 +117,89 @@ fn library(state: tauri::State<Desktop>) -> Result<Vec<Media>, String> {
     result(&state.core, state.core.store.media())
 }
 #[tauri::command]
+async fn choose_legacy_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("选择旧版 Flow2API 项目或 data 目录")
+            .blocking_pick_folder()
+            .map(|path| {
+                path.into_path()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .map_err(|e| e.to_string())
+            })
+            .transpose()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn preview_legacy(path: String) -> Result<flow2api_core::migration::Preview, String> {
+    tokio::task::spawn_blocking(move || {
+        flow2api_core::migration::preview(std::path::Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn migration_reports(
+    state: tauri::State<Desktop>,
+) -> Result<Vec<flow2api_core::migration::Report>, String> {
+    result(
+        &state.core,
+        flow2api_core::migration::reports(&state.core.store),
+    )
+}
+#[tauri::command]
+fn legacy_history(state: tauri::State<Desktop>, table: String) -> Result<Vec<Value>, String> {
+    result(
+        &state.core,
+        flow2api_core::migration::history(&state.core.store, &table),
+    )
+}
+#[tauri::command]
+async fn import_legacy(
+    state: tauri::State<'_, Desktop>,
+    path: String,
+    import_settings: bool,
+) -> Result<flow2api_core::migration::Report, String> {
+    let core = state.core.clone();
+    let _gate = core.job_gate.lock().await;
+    if core.status().busy() || !["stopped", "failed"].contains(&core.status().service.as_str()) {
+        return Err("请先停止 API，再导入旧版数据".into());
+    }
+    core.browsers.close_all().await;
+    let worker = core.clone();
+    let report = tokio::task::spawn_blocking(move || {
+        flow2api_core::migration::import(
+            &worker.store,
+            std::path::Path::new(&path),
+            import_settings,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    result(&core, core.refresh())?;
+    Ok(report)
+}
+#[tauri::command]
+async fn rollback_legacy(state: tauri::State<'_, Desktop>, id: String) -> Result<(), String> {
+    let core = state.core.clone();
+    let _gate = core.job_gate.lock().await;
+    if core.status().busy() || !["stopped", "failed"].contains(&core.status().service.as_str()) {
+        return Err("请先停止 API，再撤销导入".into());
+    }
+    core.browsers.close_all().await;
+    let worker = core.clone();
+    tokio::task::spawn_blocking(move || flow2api_core::migration::rollback(&worker.store, &id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    result(&core, core.refresh())
+}
+#[tauri::command]
 fn open_data(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
     app.opener()
         .open_path(state.core.store.root.to_string_lossy(), None::<&str>)
@@ -202,6 +286,7 @@ pub fn run() {
             show(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let core = App::open(&app.path().app_data_dir()?)?;
             let status = core.status();
@@ -361,6 +446,12 @@ pub fn run() {
             tasks,
             submit,
             library,
+            choose_legacy_directory,
+            preview_legacy,
+            import_legacy,
+            rollback_legacy,
+            migration_reports,
+            legacy_history,
             open_data,
             open_media,
             quit

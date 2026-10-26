@@ -47,6 +47,10 @@ impl App {
         Ok(())
     }
     pub async fn open_login(&self, id: &str) -> Result<()> {
+        let _admission = self.job_gate.lock().await;
+        if self.status().busy() {
+            bail!("请等待生成任务完成后打开登录窗口");
+        }
         self.store.account(id)?;
         let settings = self.store.settings()?;
         let session = self
@@ -62,6 +66,10 @@ impl App {
         Ok(())
     }
     pub async fn sync_account(&self, id: &str) -> Result<Account> {
+        let _admission = self.job_gate.lock().await;
+        if self.status().busy() {
+            bail!("请等待生成任务完成后同步账号");
+        }
         let mut account = self.store.account(id)?;
         let settings = self.store.settings()?;
         let session = self

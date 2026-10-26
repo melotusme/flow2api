@@ -3,6 +3,7 @@ pub mod browser;
 pub mod catalog;
 pub mod flow;
 pub mod generation;
+pub mod migration;
 pub mod model;
 pub mod resolver;
 pub mod store;
@@ -82,6 +83,7 @@ impl App {
         Ok(())
     }
     pub async fn start_service(self: &Arc<Self>) -> Result<Status> {
+        let _admission = self.job_gate.lock().await;
         let mut slot = self.server.lock().await;
         if slot.as_ref().is_some_and(|v| !v.done.is_finished()) {
             return Ok(self.status());

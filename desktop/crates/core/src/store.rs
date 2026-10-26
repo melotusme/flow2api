@@ -7,7 +7,7 @@ use std::{
 };
 
 pub struct Store {
-    connection: Mutex<Connection>,
+    pub(crate) connection: Mutex<Connection>,
     pub root: PathBuf,
     _instance: std::fs::File,
 }
@@ -32,7 +32,7 @@ impl Store {
         std::fs::create_dir_all(root.join("profiles"))?;
         let connection = Connection::open(root.join("desktop.db"))?;
         let schema: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if schema > 1 {
+        if schema > 2 {
             bail!("数据库由较新版本创建，请升级应用；没有修改原数据库");
         }
         connection.busy_timeout(std::time::Duration::from_secs(10))?;
@@ -41,7 +41,9 @@ impl Store {
             CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS media (filename TEXT PRIMARY KEY, value TEXT NOT NULL);
-            PRAGMA user_version=1;")?;
+            CREATE TABLE IF NOT EXISTS legacy_records (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS migration_runs (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+            PRAGMA user_version=2;")?;
         let store = Self {
             connection: Mutex::new(connection),
             root: root.to_owned(),
@@ -205,6 +207,28 @@ mod tests {
         let reopened = Store::open(dir.path())?;
         assert_eq!(reopened.task("job")?.state, "interrupted");
         assert_eq!(reopened.settings()?.api_key, key);
+        Ok(())
+    }
+    #[test]
+    fn schema_one_upgrade_preserves_data_and_adds_import_tables() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(directory.path())?;
+        let key = store.settings()?.api_key;
+        store.connection.lock().unwrap().execute_batch(
+            "DROP TABLE legacy_records; DROP TABLE migration_runs; PRAGMA user_version=1;",
+        )?;
+        drop(store);
+        let upgraded = Store::open(directory.path())?;
+        assert_eq!(upgraded.settings()?.api_key, key);
+        assert_eq!(
+            upgraded
+                .connection
+                .lock()
+                .unwrap()
+                .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+            2
+        );
+        assert!(crate::migration::reports(&upgraded)?.is_empty());
         Ok(())
     }
 }
