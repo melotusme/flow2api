@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Flow2API",
+  "version": "0.1.0",
+  "identifier": "dev.flow2api.desktop",
+  "build": { "frontendDist": "../ui" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [{ "label": "main", "title": "Flow2API", "width": 1180, "height": 800, "minWidth": 900, "minHeight": 620, "backgroundColor": "#10191c" }],
+    "security": { "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data: blob: http://127.0.0.1:*; media-src 'self' blob: http://127.0.0.1:*; object-src 'none'; frame-src 'none'" }
+  },
+  "bundle": {
+    "active": true,
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "targets": ["nsis", "app", "dmg"],
+    "shortDescription": "Flow creation workspace and local API",
+    "category": "DeveloperTool",
+    "windows": { "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true }, "nsis": { "installMode": "currentUser", "languages": ["SimpChinese", "English"], "displayLanguageSelector": true } },
+    "macOS": { "minimumSystemVersion": "12.0" }
+  }
+}

@@ -10,6 +10,9 @@ venv/
 .venv-icloud-backup/
 .venv-windows/
 .windows-launch.lock
+desktop/target/
+desktop/node_modules/
+desktop/src-tauri/gen/
 ENV/
 build/
 develop-eggs/

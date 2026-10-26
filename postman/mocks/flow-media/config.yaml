@@ -1,0 +1,11 @@
+version: 1
+id: 05916658-15d2-4cc1-a373-67769e2830ff
+name: flow-media
+slug: flow-media
+protocol: http
+interceptRequests: true
+port: 4951
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true
