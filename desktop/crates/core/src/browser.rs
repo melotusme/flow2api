@@ -349,7 +349,10 @@ mod tests {
             credits: None,
         };
         app.store.save_account(&account)?;
+        app.refresh()?;
+        assert_eq!(app.status().ready_accounts, 1);
         assert!(app.verify_login(&mut session, &mut account).await.is_err());
+        assert_eq!(app.status().ready_accounts, 0);
         assert!(app.store.account(&account.id)?.last_synced.is_none());
         assert!(app.status().browser.contains("需要重新登录同步"));
         session.socket.close(None).await?;

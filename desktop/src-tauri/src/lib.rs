@@ -366,8 +366,8 @@ pub fn run() {
                     let status = updates.borrow_and_update().clone();
                     let _ = summary.set_text(status.tray_summary());
                     let _ = details.set_text(format!(
-                        "已完成 {} · 失败／中断 {} · 账号 {}",
-                        status.succeeded, status.failed, status.accounts
+                        "已完成 {} · 失败／中断 {} · 可用账号 {}/{}",
+                        status.succeeded, status.failed, status.ready_accounts, status.accounts
                     ));
                     let _ = browser.set_text(format!("浏览器：{}", status.browser));
                     let _ = error.set_text(format!(

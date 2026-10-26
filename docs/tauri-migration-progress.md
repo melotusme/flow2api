@@ -14,7 +14,7 @@
 ## 必须继续完成并取得证据
 
 - [x] 当前 Mac 上核心、桌面工程编译检查通过，Cargo.lock 锁定依赖；Windows MSVC 交叉编译及 NSIS 打包通过，Windows 原生构建与运行仍待验证。
-- [x] 当前核心 26 项测试、1 项真实 Chrome 恢复测试与 3 项 Postman 媒体传输模拟通过；不涵盖完整生成链路。
+- [x] 当前核心 27 项测试、1 项真实 Chrome 恢复测试与 3 项 Postman 媒体传输模拟通过；不涵盖完整生成链路。
 - [ ] macOS 窗口、菜单栏、隐藏恢复、状态变化、退出释放端口与浏览器实测。
 - [ ] Windows 编译、安装、WebView2、中文路径、托盘、隐藏恢复与退出实测。
 - [ ] 图片生成、参考图、2K/4K 放大与永久保存对照。
@@ -62,3 +62,7 @@
 - 2026-10-27：使用 makensis 3.13 在 Mac 上通过 Tauri 交叉生成 NSIS 安装器并复制至 dist/Flow2API_0.1.0_x64-setup.exe。生成脚本确认为 currentUser、WebView2 下载引导；卸载删除应用数据需要勾选。PE 检查桌面程序为 x64 GUI，无外置 VC++／SQLite／Python DLL 导入。安装器引导本身为 32 位 NSIS，内含 x64 应用。没有 Windows 实际运行证据，Windows 验收项保持未勾选。
 - 2026-10-27：新增 desktop/scripts/cross-windows.sh 与 docs/windows-cross-build.md，记录旧镜像 404 的隔离缓存／工具链处理、NSIS 插件 TLS EOF 后固定校验值的下载恢复及 Windows 实机验收步骤。未修改全局 Cargo 配置和默认 Rust 工具链。
 - 2026-10-27：从 /tmp 使用完整环境变量重新运行 cross-windows.sh --offline，release 构建与 NSIS 打包成功，安装器约 5 MB；dist 中提供对应 SHA256 文件。该脚本重跑不需要 GitHub 推送权限，不依赖尚未触发的 CI。
+
+- 2026-10-27：健康接口区分总账号／启用账号／已校验登录账号，失效登录检测后立即刷新可用数；托盘显示可用／启用账号。新增公开 Prometheus `/metrics`，仅提供聚合 gauge，无账号标识或凭据。27 项核心测试通过、4 项环境测试默认忽略，包含禁用账号、登录失效与真实监听上的指标请求；登录状态为最后校验缓存，不保证当前 Google 会话仍有效。
+- 2026-10-27：本机 Parallels 注册的 Windows 10 虚拟机状态为 invalid，配置指向的 PVM 目录不存在；未找到可用 Windows SSH 会话，未执行 Windows 实机安装／运行。未修复或修改虚拟机配置。
+- 2026-10-27：登录可用数失效刷新通过真实专用 Chrome 测试；Mac arm64／x86_64 桌面重新编译并打包通用 app，Windows x64 release 与 NSIS 安装器重新构建，dist 安装器 SHA256 校验通过。本次包含监控更新；未新增 Windows 实机或真实 Flow 生成证据。

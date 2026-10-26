@@ -17,6 +17,7 @@ use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Duration};
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/metrics", get(metrics))
         .route("/v1/models", get(models))
         .route("/v1/models/aliases", get(model_aliases))
         .route("/models", get(gemini_models))
@@ -98,8 +99,18 @@ fn authorize(
 async fn health(State(app): State<Arc<App>>) -> Json<Value> {
     let s = app.status();
     Json(
-        json!({"status":"healthy","service":s.service,"active_tokens":s.accounts,"tasks":{"running":s.running,"queued":s.queued,"succeeded":s.succeeded,"failed":s.failed}}),
+        json!({"status":"healthy","backend_running":true,"service":s.service,"total_tokens":s.total_accounts,"enabled_accounts":s.accounts,"active_tokens":s.ready_accounts,"has_active_tokens":s.ready_accounts>0,"readiness_source":"last_verified_login","captcha_method":"native_chrome","remote_browser_configured":false,"tasks":{"running":s.running,"queued":s.queued,"succeeded":s.succeeded,"failed":s.failed}}),
     )
+}
+async fn metrics(State(app): State<Arc<App>>) -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        crate::monitoring::render(&app.status()),
+    )
+        .into_response()
 }
 async fn models(
     State(app): State<Arc<App>>,
@@ -511,6 +522,9 @@ mod tests {
         app.start_service().await?;
         let client = reqwest::Client::builder().no_proxy().build()?;
         let address = app.status().address.unwrap();
+        let metrics = client.get(format!("{address}/metrics")).send().await?;
+        assert_eq!(metrics.status(), 200);
+        assert!(metrics.text().await?.contains("flow2api_up 1\n"));
         assert_eq!(
             client
                 .get(format!("{address}/health"))

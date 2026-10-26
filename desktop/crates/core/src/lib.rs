@@ -5,6 +5,7 @@ pub mod flow;
 pub mod generation;
 pub mod migration;
 pub mod model;
+mod monitoring;
 mod request;
 pub mod resolver;
 pub mod store;
@@ -71,9 +72,14 @@ impl App {
     }
     pub fn refresh(&self) -> Result<()> {
         let tasks = self.store.tasks()?;
-        let accounts = self.store.accounts()?.iter().filter(|a| a.enabled).count();
+        let accounts = self.store.accounts()?;
         self.change_status(|s| {
-            s.accounts = accounts;
+            s.total_accounts = accounts.len();
+            s.accounts = accounts.iter().filter(|a| a.enabled).count();
+            s.ready_accounts = accounts
+                .iter()
+                .filter(|a| a.enabled && a.last_synced.is_some())
+                .count();
             s.queued = tasks.iter().filter(|t| t.state == "queued").count();
             s.running = tasks.iter().filter(|t| t.state == "running").count();
             s.succeeded = tasks.iter().filter(|t| t.state == "succeeded").count();

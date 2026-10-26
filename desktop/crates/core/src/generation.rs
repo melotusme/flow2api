@@ -38,6 +38,7 @@ impl App {
             // A historical sync must not keep an expired or mismatched account eligible.
             account.last_synced = None;
             self.store.save_account(account)?;
+            self.refresh()?;
             self.change_status(|s| {
                 s.browser = format!("{} 需要重新登录同步", account.email);
                 s.last_error = Some(error.to_string());

@@ -34,6 +34,17 @@ OpenAI/Gemini 简写模型支持显式比例、分辨率参数，以及首张参
 
 这些路径已通过解析与传输测试；真实 Flow 图片／视频生成和放大仍待登录后的端到端验证。
 
+## 健康检查与监控
+
+`GET /health` 与 `GET /metrics` 可在本机免鉴权读取。健康接口区分已登记、已启用和已同步登录账号；`active_tokens` 只统计启用且最后一次登录校验成功的账号。它是缓存状态（`readiness_source=last_verified_login`），不会在每次探测时访问 Google；登录失效被检测到后立即取消可用状态。`status=healthy` 表示 API 可响应，不保证账号可生成。
+
+`/metrics` 返回 Prometheus 文本，提供 API 监听、账号总数／可用数／待登录数及持久化任务状态的 gauge。任务数包含历史记录，失败与中断合并；不提供旧版完整指标集、Token 到期时间或刷新成功率。公共指标不包含账号标识或凭据。
+
+```bash
+rtk proxy curl -fsS http://127.0.0.1:8000/health
+rtk proxy curl -fsS http://127.0.0.1:8000/metrics
+```
+
 ## 双端后台状态
 
 - Windows：任务栏通知区域托盘图标，左键打开主窗口，菜单查看 API 状态、执行／排队任务、完成／失败数、账号数、浏览器状态和最近错误。

@@ -84,6 +84,8 @@ pub struct Status {
     pub succeeded: usize,
     pub failed: usize,
     pub accounts: usize,
+    pub total_accounts: usize,
+    pub ready_accounts: usize,
     pub browser: String,
     pub last_error: Option<String>,
     pub data_dir: String,
