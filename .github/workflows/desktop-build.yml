@@ -34,14 +34,18 @@ jobs:
         with:
           workspaces: desktop -> target
       - run: cargo fmt --all --check
+      - run: node --check ui/app.js
       - run: cargo test --workspace --locked
       - run: cargo install tauri-cli --version 2.10.1 --locked
-      - run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - run: cargo tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+      # upload-artifact does not preserve Unix modes or app symlinks.
+      - if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent target/universal-apple-darwin/release/bundle/macos/Flow2API.app target/universal-apple-darwin/release/bundle/macos/Flow2API-macos-universal.zip
       - uses: actions/upload-artifact@v4
         with:
           name: flow2api-${{ matrix.artifact }}
           path: |
             desktop/target/**/release/bundle/nsis/*-setup.exe
             desktop/target/**/release/bundle/dmg/*.dmg
-            desktop/target/**/release/bundle/macos/*.app
+            desktop/target/**/release/bundle/macos/*.zip
           if-no-files-found: error

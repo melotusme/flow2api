@@ -18,11 +18,15 @@ pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/models", get(models))
+        .route("/v1/models/aliases", get(model_aliases))
         .route("/models", get(gemini_models))
         .route("/v1beta/models", get(gemini_models))
         .route("/v1/chat/completions", post(completions))
-        .route("/models/{action}", post(gemini_generate))
-        .route("/v1beta/models/{action}", post(gemini_generate))
+        .route("/models/{action}", get(gemini_model).post(gemini_generate))
+        .route(
+            "/v1beta/models/{action}",
+            get(gemini_model).post(gemini_generate),
+        )
         .route("/media/{filename}", get(media))
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
         .with_state(app)
@@ -42,6 +46,36 @@ impl IntoResponse for ApiError {
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         Self(StatusCode::BAD_REQUEST, error.to_string())
+    }
+}
+struct GeminiError(ApiError);
+fn gemini_error(status: StatusCode, message: &str) -> Value {
+    let name = match status.as_u16() {
+        400 | 413 | 415 | 422 => "INVALID_ARGUMENT",
+        401 => "UNAUTHENTICATED",
+        403 => "PERMISSION_DENIED",
+        404 => "NOT_FOUND",
+        409 => "ABORTED",
+        429 => "RESOURCE_EXHAUSTED",
+        502 | 503 => "UNAVAILABLE",
+        504 => "DEADLINE_EXCEEDED",
+        _ => "INTERNAL",
+    };
+    json!({"error":{"code":status.as_u16(),"message":message,"status":name}})
+}
+impl IntoResponse for GeminiError {
+    fn into_response(self) -> Response {
+        (self.0 .0, Json(gemini_error(self.0 .0, &self.0 .1))).into_response()
+    }
+}
+impl From<ApiError> for GeminiError {
+    fn from(error: ApiError) -> Self {
+        Self(error)
+    }
+}
+impl From<anyhow::Error> for GeminiError {
+    fn from(error: anyhow::Error) -> Self {
+        Self(ApiError::from(error))
     }
 }
 fn authorize(
@@ -75,51 +109,41 @@ async fn models(
     authorize(&app, &headers, &query)?;
     Ok(Json(catalog::public_models()))
 }
-async fn gemini_models(
+async fn model_aliases(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, ApiError> {
     authorize(&app, &headers, &query)?;
+    Ok(Json(crate::resolver::public_aliases()))
+}
+fn gemini_resource(model: &Value) -> Value {
+    json!({"name":format!("models/{}",model["id"].as_str().unwrap()),"displayName":model["id"],"description":model["description"],"version":"flow2api","inputTokenLimit":0,"outputTokenLimit":0,"supportedGenerationMethods":["generateContent","streamGenerateContent"],"capabilities":model["capabilities"]})
+}
+async fn gemini_models(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, GeminiError> {
+    authorize(&app, &headers, &query)?;
     Ok(Json(
-        json!({"models":catalog::public_models()["data"].as_array().unwrap().iter().map(|m|json!({"name":format!("models/{}",m["id"].as_str().unwrap()),"displayName":m["id"],"supportedGenerationMethods":["generateContent","streamGenerateContent"],"capabilities":m["capabilities"]})).collect::<Vec<_>>()}),
+        json!({"models":catalog::public_models()["data"].as_array().unwrap().iter().map(gemini_resource).collect::<Vec<_>>()}),
     ))
 }
-fn parse_openai(body: &Value) -> Result<GenerationRequest, ApiError> {
-    let model = body["model"]
-        .as_str()
-        .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "缺少 model".into()))?
-        .to_owned();
-    let mut prompt = vec![];
-    let mut images = vec![];
-    let mut video_id = None;
-    for message in body["messages"]
+async fn gemini_model(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, GeminiError> {
+    authorize(&app, &headers, &query)?;
+    catalog::public_models()["data"]
         .as_array()
-        .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "缺少 messages".into()))?
-    {
-        if let Some(text) = message["content"].as_str() {
-            prompt.push(text.to_owned());
-        }
-        for part in message["content"].as_array().into_iter().flatten() {
-            if let Some(text) = part["text"].as_str() {
-                prompt.push(text.to_owned());
-            }
-            if let Some(url) = part["image_url"]["url"].as_str() {
-                if let Some(id) = url.strip_prefix("extend://") {
-                    video_id = Some(id.into());
-                } else {
-                    images.push(url.into());
-                }
-            }
-        }
-    }
-    Ok(GenerationRequest {
-        model,
-        prompt: prompt.join("\n"),
-        images,
-        account_id: None,
-        video_id,
-    })
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == id)
+        .map(|model| Json(gemini_resource(model)))
+        .ok_or_else(|| GeminiError(ApiError(StatusCode::NOT_FOUND, "模型不存在".into())))
 }
 async fn completions(
     State(app): State<Arc<App>>,
@@ -128,8 +152,10 @@ async fn completions(
     Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
     authorize(&app, &headers, &query)?;
-    let mut request = parse_openai(&body)?;
-    crate::resolver::prepare(&mut request, &body, &app.store.settings()?).await?;
+    let mut request = crate::request::openai(&body)?;
+    let settings = app.store.settings()?;
+    crate::request::append_history(&mut request, &body, &settings).await?;
+    crate::resolver::prepare(&mut request, &body, &settings).await?;
     let task = app.submit(request).await?;
     if body["stream"] == true {
         return Ok(openai_stream(app, task));
@@ -224,59 +250,26 @@ async fn gemini_generate(
     Path(action): Path<String>,
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
-    Json(body): Json<Value>,
-) -> Result<Response, ApiError> {
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, GeminiError> {
     authorize(&app, &headers, &query)?;
+    let Json(body) =
+        body.map_err(|error| ApiError(error.status(), "Gemini 请求 JSON 无效".into()))?;
     let (id, method) = action
         .rsplit_once(':')
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "未知 Gemini 方法".into()))?;
     if !["generateContent", "streamGenerateContent"].contains(&method) {
-        return Err(ApiError(StatusCode::NOT_FOUND, "未知 Gemini 方法".into()));
+        return Err(ApiError(StatusCode::NOT_FOUND, "未知 Gemini 方法".into()).into());
     }
-    let mut texts = vec![];
-    let mut images = vec![];
-    for part in body["systemInstruction"]["parts"]
-        .as_array()
-        .into_iter()
-        .flatten()
-    {
-        if let Some(text) = part["text"].as_str() {
-            texts.push(text.to_owned());
-        }
-    }
-    for content in body["contents"].as_array().into_iter().flatten() {
-        for part in content["parts"].as_array().into_iter().flatten() {
-            if let Some(text) = part["text"].as_str() {
-                texts.push(text.to_owned());
-            }
-            if let Some(data) = part["inlineData"]["data"].as_str() {
-                images.push(format!(
-                    "data:{};base64,{data}",
-                    part["inlineData"]["mimeType"]
-                        .as_str()
-                        .unwrap_or("image/jpeg")
-                ));
-            }
-            if let Some(url) = part["fileData"]["fileUri"].as_str() {
-                images.push(url.into());
-            }
-        }
-    }
-    let mut request = GenerationRequest {
-        model: id.into(),
-        prompt: texts.join("\n"),
-        images,
-        account_id: None,
-        video_id: None,
-    };
+    let mut request = crate::request::gemini(id, &body)?;
     crate::resolver::prepare(&mut request, &body, &app.store.settings()?).await?;
     let task = app.submit(request).await?;
     if method == "streamGenerateContent" {
         let stream = async_stream::stream! {
             match wait_task(&app,&task.id).await {
-                Ok(task) if task.state == "succeeded" => match gemini_result(&app,&task).await { Ok(value)=>yield Ok::<_,Infallible>(Event::default().data(value.to_string())), Err(error)=>yield Ok(Event::default().data(json!({"error":{"message":error.1}}).to_string())) },
-                Ok(task)=>yield Ok(Event::default().data(json!({"error":{"message":task.error}}).to_string())),
-                Err(error)=>yield Ok(Event::default().data(json!({"error":{"message":error.1}}).to_string())),
+                Ok(task) if task.state == "succeeded" => match gemini_result(&app,&task).await { Ok(value)=>yield Ok::<_,Infallible>(Event::default().data(value.to_string())), Err(error)=>yield Ok(Event::default().data(gemini_error(error.0, &error.1).to_string())) },
+                Ok(task)=>yield Ok(Event::default().data(gemini_error(StatusCode::BAD_GATEWAY, task.error.as_deref().unwrap_or("任务失败")).to_string())),
+                Err(error)=>yield Ok(Event::default().data(gemini_error(error.0, &error.1).to_string())),
             }
         };
         return Ok(Sse::new(stream)
@@ -288,7 +281,8 @@ async fn gemini_generate(
         return Err(ApiError(
             StatusCode::BAD_GATEWAY,
             task.error.unwrap_or_else(|| "任务失败".into()),
-        ));
+        )
+        .into());
     }
     Ok(Json(gemini_result(&app, &task).await?).into_response())
 }
@@ -415,6 +409,66 @@ fn byte_range(raw: &str, size: u64) -> Option<(u64, u64)> {
 mod tests {
     use super::*;
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn client_discovery_routes_and_gemini_errors_match_protocol() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let app = App::open(directory.path())?;
+        let key = app.store.settings()?.api_key;
+        for (path, auth, status, field) in [
+            ("/v1/models/aliases", true, 200, "data"),
+            (
+                "/models/gemini-3.1-flash-image-square",
+                true,
+                200,
+                "supportedGenerationMethods",
+            ),
+            (
+                "/v1beta/models/gemini-3.1-flash-image-square",
+                true,
+                200,
+                "supportedGenerationMethods",
+            ),
+            ("/v1beta/models/not-a-model", true, 404, "error"),
+            ("/models", false, 401, "error"),
+        ] {
+            let mut request = axum::http::Request::builder().uri(path);
+            if auth {
+                request = request.header("x-goog-api-key", &key);
+            }
+            let response = router(app.clone())
+                .oneshot(request.body(Body::empty())?)
+                .await?;
+            assert_eq!(response.status().as_u16(), status, "{path}");
+            let body: Value = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 1_000_000).await?,
+            )?;
+            assert!(!body[field].is_null(), "{path}");
+            if status == 404 {
+                assert_eq!(body["error"]["status"], "NOT_FOUND");
+            }
+            if status == 401 {
+                assert_eq!(body["error"]["status"], "UNAUTHENTICATED");
+            }
+            if path.ends_with("aliases") {
+                assert!(body["data"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m["id"] == "gemini-3.1-flash-image" && m["is_alias"] == true));
+            }
+        }
+        for input in ["{", "{\"contents\":[]}", "{\"contents\":[{\"parts\":[{\"inlineData\":{\"mimeType\":\"video/mp4\",\"data\":\"bad\"}}]}]}"] {
+            let request = axum::http::Request::builder().method("POST").uri("/models/gemini-3.1-flash-image:generateContent")
+                .header("content-type", "application/json").header("x-goog-api-key", &key).body(Body::from(input))?;
+            let response = router(app.clone()).oneshot(request).await?;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 1_000_000).await?)?;
+            assert_eq!(body["error"]["code"], 400);
+            assert_eq!(body["error"]["status"], "INVALID_ARGUMENT");
+        }
+        assert!(app.store.tasks()?.is_empty());
+        Ok(())
+    }
     #[tokio::test]
     async fn media_ranges_support_video_seeking_and_reject_invalid_ranges() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;

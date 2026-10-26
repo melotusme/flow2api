@@ -30,6 +30,8 @@ rtk proxy curl -fsS http://127.0.0.1:8000/health
 
 OpenAI/Gemini 简写模型支持显式比例、分辨率参数，以及首张参考图的 EXIF 方向和最近比例推断。自动推断后复用已下载字节，避免临时图片 URL 二次读取；参考图限制 20 MB。视频以任务 ID 匹配批量状态，分别保存每个返回结果，并在放大前核对媒体 ID。
 
+多轮请求保留旧版语义：OpenAI 只读取最后消息，图片编辑补入最近可下载的 assistant 图片；Gemini 读取最后 user 内容，并去除工具调用脚手架。OpenAI 还支持顶层 `image` 和 Gemini `contents` 请求格式。模型发现支持 `/v1/models/aliases`、`/models/{model}` 与 `/v1beta/models/{model}`；Gemini 错误返回 `code`、`message` 和 `status`。
+
 这些路径已通过解析与传输测试；真实 Flow 图片／视频生成和放大仍待登录后的端到端验证。
 
 ## 双端后台状态
@@ -57,13 +59,16 @@ rtk proxy cargo test --manifest-path desktop/Cargo.toml -p flow2api-core browser
 在 `desktop` 目录：
 
 ```bash
-# macOS
-rtk proxy cargo tauri build --bundles app,dmg
+# macOS 通用包，支持 Intel 与 Apple Silicon
+rtk proxy rustup target add aarch64-apple-darwin x86_64-apple-darwin
+rtk proxy cargo tauri build --target universal-apple-darwin --bundles app,dmg -- --locked
 # Windows（在 Windows MSVC 开发环境中）
-rtk proxy cargo tauri build --bundles nsis
+rtk proxy cargo tauri build --bundles nsis -- --locked
 ```
 
-Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。macOS `.app` / `.dmg` 与 Windows `.exe` 由 `.github/workflows/desktop-build.yml` 构建。未配置代码签名与公证前，不能将未签名开发包当作正式发行版。
+Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。macOS `.app` / `.dmg` 与 Windows `.exe` 由 `.github/workflows/desktop-build.yml` 配置构建。工作流未实际运行；macOS app 先用 ditto 压缩再上传，下载 ZIP 后解压使用，以保留权限和符号链接。未配置代码签名与公证前，不能将未签名开发包当作正式发行版。
+
+本机已生成未签名的通用开发 ZIP：`../dist/flow2api-macos-universal-debug-20261027.zip`。它包含 arm64 与 x86_64 程序，当前 Apple Silicon Mac 已启动验证；Intel Mac 实机与正式签名尚未验证。开发包不代表完整 Flow 功能验收通过。
 
 ## 从 Python 版迁移
 

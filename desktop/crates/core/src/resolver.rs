@@ -6,7 +6,7 @@ use crate::{
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::ImageDecoder;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::OnceLock;
 
 fn tables() -> &'static Value {
@@ -15,6 +15,46 @@ fn tables() -> &'static Value {
         serde_json::from_str(include_str!("../assets/model-aliases.json"))
             .expect("legacy resolver tables")
     })
+}
+pub fn public_aliases() -> Value {
+    let tables = tables();
+    let mut aliases = vec![];
+    for (alias, base) in tables["IMAGE_BASE_MODELS"].as_object().unwrap() {
+        let base = base.as_str().unwrap();
+        let aspects = tables["MODEL_SUPPORTED_ASPECTS"][base]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        let sizes = tables["MODEL_SUPPORTED_SIZES"][base]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        let description = format!(
+            "Image generation (alias) - aspects: {aspects}{}",
+            if sizes.is_empty() {
+                String::new()
+            } else {
+                format!("; sizes: {sizes}")
+            }
+        );
+        aliases.push(json!({"id":alias,"object":"model","owned_by":"flow2api","description":description,"is_alias":true}));
+    }
+    for alias in tables["VIDEO_BASE_MODELS"].as_object().unwrap().keys() {
+        aliases.push(json!({"id":alias,"object":"model","owned_by":"flow2api","description":"Video generation (alias) - supports landscape/portrait via generationConfig","is_alias":true}));
+    }
+    json!({"object":"list","data":aliases})
 }
 fn field<'a>(value: &'a Value, names: &[&str]) -> Option<&'a str> {
     names.iter().find_map(|name| {

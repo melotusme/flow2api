@@ -16,5 +16,5 @@ pub fn model(id: &str) -> Result<Value> {
         .context("未知模型，请刷新模型清单")
 }
 pub fn public_models() -> Value {
-    json!({"object":"list","data":catalog().as_object().unwrap().iter().filter(|(_,v)| v["config"]["listed"] != false).map(|(id,v)| json!({"id":id,"object":"model","owned_by":"flow2api","capabilities":v["capabilities"]})).collect::<Vec<_>>()})
+    json!({"object":"list","data":catalog().as_object().unwrap().iter().filter(|(_,v)| v["config"]["listed"] != false).map(|(id,v)| json!({"id":id,"object":"model","owned_by":"flow2api","description":v["config"]["display_name"].as_str().unwrap_or_else(|| v["capabilities"]["family"].as_str().unwrap_or(id)),"capabilities":v["capabilities"]})).collect::<Vec<_>>()})
 }
