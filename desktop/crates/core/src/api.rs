@@ -129,7 +129,7 @@ async fn completions(
 ) -> Result<Response, ApiError> {
     authorize(&app, &headers, &query)?;
     let mut request = parse_openai(&body)?;
-    request.model = resolve_model(&request.model, &body);
+    crate::resolver::prepare(&mut request, &body, &app.store.settings()?).await?;
     let task = app.submit(request).await?;
     if body["stream"] == true {
         return Ok(openai_stream(app, task));
@@ -143,9 +143,6 @@ async fn completions(
     }
     let content = markdown(&app, &task);
     Ok(Json(json!({"id":task.id,"object":"chat.completion","created":chrono::Utc::now().timestamp(),"model":task.request.model,"choices":[{"index":0,"message":{"role":"assistant","content":content},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}})).into_response())
-}
-fn resolve_model(id: &str, body: &Value) -> String {
-    crate::resolver::resolve(id, body)
 }
 async fn wait_task(app: &App, id: &str) -> Result<Task, ApiError> {
     loop {
@@ -265,15 +262,15 @@ async fn gemini_generate(
             }
         }
     }
-    let task = app
-        .submit(GenerationRequest {
-            model: resolve_model(id, &body),
-            prompt: texts.join("\n"),
-            images,
-            account_id: None,
-            video_id: None,
-        })
-        .await?;
+    let mut request = GenerationRequest {
+        model: id.into(),
+        prompt: texts.join("\n"),
+        images,
+        account_id: None,
+        video_id: None,
+    };
+    crate::resolver::prepare(&mut request, &body, &app.store.settings()?).await?;
+    let task = app.submit(request).await?;
     if method == "streamGenerateContent" {
         let stream = async_stream::stream! {
             match wait_task(&app,&task.id).await {

@@ -338,38 +338,48 @@ impl App {
             )?;
             self.stage(&task.id, "提交视频任务")?;
             let payload = flow::rpc(&mut session, rpc, argument, Some(&account.project_id)).await?;
-            let (mut url, mut media_id) = self
+            let videos = self
                 .poll_video(&mut session, task, &account.project_id, payload)
                 .await?;
-            if cfg["upsample"].is_object() {
-                // The catalog carries the exact resolution and upsampler key.
-                let upsample = &cfg["upsample"];
-                let resolution = upsample["resolution"]
-                    .as_str()
-                    .context("视频放大配置缺少分辨率")?;
-                let captcha = session.captcha("VIDEO_GENERATION").await?;
-                let (rpc, argument) = flow::video_argument(
-                    &account.project_id,
-                    "",
-                    upsample["model_key"].as_str().unwrap_or(""),
-                    aspect,
-                    &captcha,
-                    "upsample",
-                    &[],
-                    Some(&media_id),
-                    Some(resolution),
-                )?;
-                let payload =
-                    flow::rpc(&mut session, rpc, argument, Some(&account.project_id)).await?;
-                (url, media_id) = self
-                    .poll_video(&mut session, task, &account.project_id, payload)
-                    .await?;
+            let mut results = vec![];
+            for video in videos {
+                let videos = if cfg["upsample"].is_object() {
+                    if video.media_id.is_empty() {
+                        bail!("视频返回了下载地址但缺少媒体 ID，无法放大；请核对 Flow 结果");
+                    }
+                    let upsample = &cfg["upsample"];
+                    let resolution = upsample["resolution"]
+                        .as_str()
+                        .context("视频放大配置缺少分辨率")?;
+                    self.stage(&task.id, "视频高清放大")?;
+                    let captcha = session.captcha("VIDEO_GENERATION").await?;
+                    let (rpc, argument) = flow::video_argument(
+                        &account.project_id,
+                        "",
+                        upsample["model_key"].as_str().unwrap_or(""),
+                        aspect,
+                        &captcha,
+                        "upsample",
+                        &[],
+                        Some(&video.media_id),
+                        Some(resolution),
+                    )?;
+                    let payload =
+                        flow::rpc(&mut session, rpc, argument, Some(&account.project_id)).await?;
+                    self.poll_video(&mut session, task, &account.project_id, payload)
+                        .await?
+                } else {
+                    vec![video]
+                };
+                for video in videos {
+                    self.stage(&task.id, "保存视频到本机")?;
+                    results.push(
+                        self.archive(&video.url, "video", &task.id, &video.media_id, settings)
+                            .await?,
+                    );
+                }
             }
-            self.stage(&task.id, "保存视频到本机")?;
-            Ok(vec![
-                self.archive(&url, "video", &task.id, &media_id, settings)
-                    .await?,
-            ])
+            Ok(results)
         }
     }
     async fn poll_video(
@@ -377,51 +387,30 @@ impl App {
         session: &mut Session,
         task: &Task,
         project: &str,
-        mut payload: Value,
-    ) -> Result<(String, String)> {
-        let records = flow::video_records(&payload, Some(project));
-        let operation = records
-            .first()
-            .and_then(|v| v[0].as_str())
-            .map(str::to_owned);
-        let mut media_id = records
-            .first()
-            .and_then(|v| v[2].as_str())
-            .map(str::to_owned)
-            .unwrap_or_default();
+        payload: Value,
+    ) -> Result<Vec<crate::video::VideoResult>> {
+        let mut batch = crate::video::VideoBatch::submitted(&payload, project)?;
         loop {
-            if let Some(id) = flow::video_records(&payload, Some(project))
-                .first()
-                .and_then(|v| v[2].as_str())
-            {
-                media_id = id.to_owned();
+            if let Some(results) = batch.results() {
+                return Ok(results);
             }
-            if let Some(url) = flow::media_url(&payload, "video") {
-                return Ok((url, media_id));
-            }
-            if let Some(code) = flow::error_code(&payload) {
-                bail!("Flow 视频生成失败：{code}");
-            }
-            let operation = operation.as_deref().context("视频提交未返回任务 ID")?;
             self.stage(&task.id, "Flow 正在生成视频")?;
             sleep(Duration::from_secs(3)).await;
-            payload = flow::rpc(
+            let operations: Vec<Value> = batch.pending().iter().map(|id| json!([id])).collect();
+            let payload = flow::rpc(
                 session,
                 "jwpduf",
-                json!([null, null, [[operation]]]),
+                json!([null, null, operations]),
                 Some(project),
             )
             .await?;
-            if flow::media_url(&payload, "video").is_none() && flow::error_code(&payload).is_none()
-            {
-                // The frontend sometimes publishes the media before polling reports completion.
-                // This is a read-only lookup; never resubmit a generation to recover a URL.
+            batch.update(&payload, None)?;
+            for operation in batch.pending() {
+                // Read-only lookup: never resubmit generation to recover a URL.
                 if let Ok(media) =
                     flow::rpc(session, "as29s", json!([operation]), Some(project)).await
                 {
-                    if let Some(url) = flow::media_url(&media, "video") {
-                        return Ok((url, media_id));
-                    }
+                    batch.update(&media, Some(&operation))?;
                 }
             }
         }
@@ -546,8 +535,11 @@ fn http_client(settings: &Settings) -> Result<reqwest::Client> {
     }
     Ok(builder.build()?)
 }
-async fn load_image(image: &str, settings: &Settings) -> Result<(Vec<u8>, String)> {
+pub(crate) async fn load_image(image: &str, settings: &Settings) -> Result<(Vec<u8>, String)> {
     let bytes = if image.starts_with("data:image/") {
+        if image.len() > (20usize * 1024 * 1024).div_ceil(3) * 4 + 1024 {
+            bail!("参考图超过 20 MB");
+        }
         STANDARD
             .decode(image.split_once(',').context("图片 data URI 格式错误")?.1)
             .context("图片 base64 格式错误")?
@@ -566,11 +558,17 @@ async fn load_image(image: &str, settings: &Settings) -> Result<(Vec<u8>, String
         {
             bail!("参考图下载失败或超过 20 MB");
         }
-        response
-            .bytes()
-            .await
-            .map_err(|_| anyhow::anyhow!("参考图读取失败"))?
-            .to_vec()
+        let mut bytes = Vec::new();
+        let mut stream = response.bytes_stream();
+        use futures_util::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| anyhow::anyhow!("参考图读取失败"))?;
+            if bytes.len() + chunk.len() > 20 * 1024 * 1024 {
+                bail!("参考图超过 20 MB");
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        bytes
     };
     if bytes.len() > 20 * 1024 * 1024 {
         bail!("参考图超过 20 MB");

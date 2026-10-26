@@ -7,6 +7,7 @@ pub mod migration;
 pub mod model;
 pub mod resolver;
 pub mod store;
+mod video;
 
 use anyhow::{bail, Result};
 use model::*;

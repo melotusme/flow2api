@@ -1,5 +1,11 @@
 //! Compatibility with the archived Python model resolver.
-use crate::catalog;
+use crate::{
+    catalog,
+    model::{GenerationRequest, Settings},
+};
+use anyhow::Result;
+use base64::{engine::general_purpose::STANDARD, Engine};
+use image::ImageDecoder;
 use serde_json::Value;
 use std::sync::OnceLock;
 
@@ -92,8 +98,86 @@ fn parameters(body: &Value) -> (Option<String>, Option<String>) {
     (ratio, size)
 }
 pub fn resolve(id: &str, body: &Value) -> String {
+    resolve_with_dimensions(id, body, None)
+}
+fn closest_aspect(width: u32, height: u32, video: bool) -> Option<String> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let ratio = f64::from(width) / f64::from(height);
+    let inferred = [
+        ("landscape", 16. / 9.),
+        ("portrait", 9. / 16.),
+        ("square", 1.),
+        ("four-three", 4. / 3.),
+        ("three-four", 3. / 4.),
+    ]
+    .into_iter()
+    .min_by(|a, b| (ratio - a.1).abs().total_cmp(&(ratio - b.1).abs()))?
+    .0;
+    Some(
+        if video && !["landscape", "portrait"].contains(&inferred) {
+            if height > width {
+                "portrait"
+            } else {
+                "landscape"
+            }
+        } else {
+            inferred
+        }
+        .into(),
+    )
+}
+fn oriented_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_decoder()
+        .ok()?;
+    let (width, height) = decoder.dimensions();
+    let orientation = decoder.orientation().ok()?.to_exif();
+    Some(if (5..=8).contains(&orientation) {
+        (height, width)
+    } else {
+        (width, height)
+    })
+}
+pub async fn prepare(
+    request: &mut GenerationRequest,
+    body: &Value,
+    settings: &Settings,
+) -> Result<()> {
+    let id = request.model.clone();
+    let infer = parameters(body).0.is_none()
+        && (tables()["IMAGE_BASE_MODELS"].get(&id).is_some()
+            || tables()["VIDEO_BASE_MODELS"].get(&id).is_some());
+    request.model = resolve(&id, body);
+    crate::generation::validate(request)?;
+    let dimensions = if infer {
+        if let Some(first) = request.images.first_mut() {
+            let (bytes, mime) = crate::generation::load_image(first, settings).await?;
+            let dimensions = oriented_dimensions(&bytes);
+            // Cache the exact downloaded bytes in the task; generation uploads them
+            // once rather than fetching a potentially changing URL a second time.
+            *first = format!("data:{mime};base64,{}", STANDARD.encode(&bytes));
+            dimensions
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    request.model = resolve_with_dimensions(&id, body, dimensions);
+    Ok(())
+}
+fn resolve_with_dimensions(id: &str, body: &Value, dimensions: Option<(u32, u32)>) -> String {
     let tables = tables();
-    let (ratio, size) = parameters(body);
+    let (mut ratio, size) = parameters(body);
+    if ratio.is_none() {
+        ratio = dimensions.and_then(|(width, height)| {
+            closest_aspect(width, height, tables["VIDEO_BASE_MODELS"].get(id).is_some())
+        });
+    }
     if let Some(base) = tables["IMAGE_BASE_MODELS"][id].as_str() {
         let ratio = ratio
             .as_deref()
@@ -144,6 +228,97 @@ pub fn resolve(id: &str, body: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::new(width, height))
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        bytes.into_inner()
+    }
+    #[tokio::test]
+    async fn reference_dimensions_follow_alias_without_overriding_explicit_ratio() -> Result<()> {
+        let data = format!("data:image/png;base64,{}", STANDARD.encode(png(30, 40)));
+        let mut request = GenerationRequest {
+            model: "gemini-3.1-flash-image".into(),
+            prompt: "fixture".into(),
+            images: vec![data.clone()],
+            account_id: None,
+            video_id: None,
+        };
+        prepare(&mut request, &json!({}), &Settings::default()).await?;
+        assert_eq!(request.model, "gemini-3.1-flash-image-three-four");
+        request.model = "gemini-3.1-flash-image".into();
+        prepare(
+            &mut request,
+            &json!({"generationConfig":{"imageConfig":{"aspectRatio":"1:1"}}}),
+            &Settings::default(),
+        )
+        .await?;
+        assert_eq!(request.model, "gemini-3.1-flash-image-square");
+        request.model = "veo_3_1_i2v_s_fast_fl".into();
+        prepare(&mut request, &json!({}), &Settings::default()).await?;
+        assert_eq!(request.model, "veo_3_1_i2v_s_fast_portrait_fl");
+        assert_eq!(request.images[0], data);
+        Ok(())
+    }
+    #[test]
+    fn jpeg_exif_orientation_swaps_dimensions_before_inference() {
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+            .encode_image(&image::DynamicImage::ImageRgb8(image::RgbImage::new(8, 4)))
+            .unwrap();
+        assert_eq!(oriented_dimensions(&jpeg), Some((8, 4)));
+        let exif = b"Exif\0\0II*\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x06\0\0\0\0\0\0\0";
+        let mut segment = vec![0xff, 0xe1];
+        segment.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+        segment.extend_from_slice(exif);
+        jpeg.splice(2..2, segment);
+        assert_eq!(oriented_dimensions(&jpeg), Some((4, 8)));
+        assert_eq!(
+            resolve_with_dimensions(
+                "gemini-3.1-flash-image",
+                &json!({}),
+                oriented_dimensions(&jpeg)
+            ),
+            "gemini-3.1-flash-image-portrait"
+        );
+        assert_eq!(oriented_dimensions(b"<html>not an image</html>"), None);
+    }
+    #[tokio::test]
+    #[ignore = "requires the local Postman media simulation and FLOW2API_MEDIA_SIM_URL"]
+    async fn reference_transport_simulation() -> Result<()> {
+        let base = std::env::var("FLOW2API_MEDIA_SIM_URL")?;
+        let url = format!("{base}/image/once/{}", uuid::Uuid::new_v4());
+        let mut request = GenerationRequest {
+            model: "gemini-3.1-flash-image".into(),
+            prompt: "fixture".into(),
+            images: vec![url.clone()],
+            account_id: None,
+            video_id: None,
+        };
+        let settings = Settings::default();
+        prepare(&mut request, &json!({}), &settings).await?;
+        assert_eq!(request.model, "gemini-3.1-flash-image-square");
+        assert!(request.images[0].starts_with("data:image/png;base64,"));
+        let (bytes, _) = crate::generation::load_image(&request.images[0], &settings).await?;
+        assert_eq!(oriented_dimensions(&bytes), Some((1, 1)));
+        // Prove a second HTTP read would fail, while the generation upload source above succeeds.
+        assert!(crate::generation::load_image(&url, &settings)
+            .await
+            .is_err());
+        let error =
+            crate::generation::load_image(&format!("{base}/image/chunked-oversize"), &settings)
+                .await
+                .err()
+                .expect("oversize must fail");
+        assert!(error.to_string().contains("20 MB"));
+        assert!(
+            crate::generation::load_image(&format!("{base}/image/html"), &settings)
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
     #[test]
     fn legacy_image_defaults_and_config_precedence() {
         assert_eq!(
