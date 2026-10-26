@@ -18,6 +18,7 @@ from ..core.account_tiers import (
     normalize_user_paygate_tier,
     supports_model_for_tier,
 )
+from .media_archive import MediaArchive
 from .file_cache import FileCache
 
 
@@ -1406,6 +1407,11 @@ class GenerationHandler:
             flow_client=flow_client,
         )
 
+    async def _archive_output(self, source, kind, response_state):
+        archive = MediaArchive()
+        filename = await archive.save(source, kind, self.file_cache)
+        return f"{self._get_base_url(response_state)}/media/{filename}"
+
     def _create_generation_result(self) -> Dict[str, Any]:
         """????????????????"""
         return dict(success=False, error_message=None, error_emitted=False)
@@ -2241,109 +2247,19 @@ class GenerationHandler:
                                 "upscaled_image": {"resolution": resolution_name},
                             }
 
-                            if str(encoded_image).startswith("https://"):
-                                response_state["url"] = encoded_image
-                                response_state["generated_assets"]["upscaled_image"][
-                                    "url"
-                                ] = encoded_image
-                                response_state["generated_assets"]["upscaled_image"][
-                                    "delivery_mode"
-                                ] = "frontend_url"
-                                self._mark_generation_succeeded(generation_result)
-                                if stream:
-                                    yield self._create_stream_chunk(
-                                        f"![Generated Image]({encoded_image})",
-                                        finish_reason="stop",
-                                    )
-                                else:
-                                    yield self._create_completion_response(
-                                        encoded_image,
-                                        media_type="image",
-                                    )
-                                if image_trace is not None:
-                                    image_trace["upsample_ms"] = int(
-                                        (time.time() - upsample_started_at) * 1000
-                                    )
-                                return
-
-                            try:
-                                await self._update_request_log_progress(
-                                    request_log_state,
-                                    token_id=token.id,
-                                    status_text="caching_image",
-                                    progress=90,
-                                )
-                                if stream:
-                                    yield self._create_stream_chunk(
-                                        f"缓存 {resolution_name} 图片中...\n"
-                                    )
-                                cached_filename = (
-                                    await self.file_cache.cache_base64_image(
-                                        encoded_image, resolution_name
-                                    )
-                                )
-                                local_url = f"{self._get_base_url(response_state)}/tmp/{cached_filename}"
-                                response_state["url"] = local_url
-                                response_state["generated_assets"]["upscaled_image"][
-                                    "local_url"
-                                ] = local_url
-                                response_state["generated_assets"]["upscaled_image"][
-                                    "url"
-                                ] = local_url
-                                self._mark_generation_succeeded(generation_result)
-                                if stream:
-                                    yield self._create_stream_chunk(
-                                        f"✅ {resolution_name} 图片缓存成功\n"
-                                    )
-                                    yield self._create_stream_chunk(
-                                        f"![Generated Image]({local_url})",
-                                        finish_reason="stop",
-                                    )
-                                else:
-                                    yield self._create_completion_response(
-                                        local_url, media_type="image"
-                                    )
-                                if image_trace is not None:
-                                    image_trace["upsample_ms"] = int(
-                                        (time.time() - upsample_started_at) * 1000
-                                    )
-                                return
-                            except Exception as e:
-                                debug_logger.log_error(
-                                    f"Failed to cache {resolution_name} image: {str(e)}"
-                                )
-                                response_state["url"] = image_url
-                                response_state["generated_assets"]["upscaled_image"][
-                                    "local_url"
-                                ] = None
-                                response_state["generated_assets"]["upscaled_image"][
-                                    "url"
-                                ] = image_url
-                                response_state["generated_assets"]["upscaled_image"][
-                                    "delivery_mode"
-                                ] = "inline_base64_fallback"
-                                self._mark_generation_succeeded(generation_result)
-                                base64_url = f"data:image/jpeg;base64,{encoded_image}"
-                                if stream:
-                                    cache_error = self._normalize_error_message(
-                                        e, max_length=120
-                                    )
-                                    yield self._create_stream_chunk(
-                                        f"⚠️ 缓存失败: {cache_error}，返回内联图片...\n"
-                                    )
-                                    yield self._create_stream_chunk(
-                                        f"![Generated Image]({base64_url})",
-                                        finish_reason="stop",
-                                    )
-                                else:
-                                    yield self._create_completion_response(
-                                        base64_url, media_type="image"
-                                    )
-                                if image_trace is not None:
-                                    image_trace["upsample_ms"] = int(
-                                        (time.time() - upsample_started_at) * 1000
-                                    )
-                                return
+                            local_url = await self._archive_output(encoded_image, "image", response_state)
+                            response_state["url"] = local_url
+                            response_state["generated_assets"]["upscaled_image"]["url"] = local_url
+                            response_state["generated_assets"]["upscaled_image"]["delivery_mode"] = "local_archive"
+                            self._mark_generation_succeeded(generation_result)
+                            if stream:
+                                yield self._create_stream_chunk("✅ 图片已永久保存到本机\n")
+                                yield self._create_stream_chunk(f"![Generated Image]({local_url})", finish_reason="stop")
+                            else:
+                                yield self._create_completion_response(local_url, media_type="image")
+                            if image_trace is not None:
+                                image_trace["upsample_ms"] = int((time.time() - upsample_started_at) * 1000)
+                            return
                         else:
                             debug_logger.log_warning("[UPSAMPLE] 返回结果为空")
                             if stream:
@@ -2388,38 +2304,10 @@ class GenerationHandler:
                         "delivery_mode": "origin_fallback",
                     }
 
-            local_url = image_url
             cache_started_at = time.time()
-            if config.cache_enabled:
-                await self._update_request_log_progress(
-                    request_log_state,
-                    token_id=token.id,
-                    status_text="caching_image",
-                    progress=90,
-                )
-                if stream:
-                    yield self._create_stream_chunk("正在缓存 1K 图片文件...\n")
-                try:
-                    cached_filename = await self.file_cache.download_and_cache(
-                        image_url, "image"
-                    )
-                    local_url = (
-                        f"{self._get_base_url(response_state)}/tmp/{cached_filename}"
-                    )
-                    if stream:
-                        yield self._create_stream_chunk(
-                            "✅ 1K 图片缓存成功,准备返回缓存地址...\n"
-                        )
-                except Exception as e:
-                    debug_logger.log_error(f"Failed to cache 1K image: {str(e)}")
-                    local_url = image_url
-                    if stream:
-                        cache_error = self._normalize_error_message(e, max_length=120)
-                        yield self._create_stream_chunk(
-                            f"⚠️ 缓存失败: {cache_error}\n正在返回源链接...\n"
-                        )
-            elif stream:
-                yield self._create_stream_chunk("缓存已关闭,正在返回官方图片链接...\n")
+            local_url = await self._archive_output(image_url, "image", response_state)
+            if stream:
+                yield self._create_stream_chunk("✅ 图片已永久保存到本机，可在「本机资源」查看\n")
             if image_trace is not None:
                 image_trace["cache_image_ms"] = int(
                     (time.time() - cache_started_at) * 1000
@@ -3149,42 +3037,9 @@ class GenerationHandler:
                             "续写片段已生成；当前 Flow 前端未提供媒体拼接 RPC，返回续写片段。\n"
                         )
 
-                    # 缓存视频 (如果启用)
-                    local_url = video_url
-                    if config.cache_enabled:
-                        await self._update_request_log_progress(
-                            request_log_state,
-                            token_id=token.id,
-                            status_text="caching_video",
-                            progress=92,
-                        )
-                        try:
-                            if stream:
-                                yield self._create_stream_chunk("正在缓存视频文件...\n")
-                            cached_filename = await self.file_cache.download_and_cache(
-                                video_url, "video"
-                            )
-                            local_url = f"{self._get_base_url(response_state)}/tmp/{cached_filename}"
-                            if stream:
-                                yield self._create_stream_chunk(
-                                    "✅ 视频缓存成功,准备返回缓存地址...\n"
-                                )
-                        except Exception as e:
-                            debug_logger.log_error(f"Failed to cache video: {str(e)}")
-                            # 缓存失败不影响结果返回,使用原始URL
-                            local_url = video_url
-                            if stream:
-                                cache_error = self._normalize_error_message(
-                                    e, max_length=120
-                                )
-                                yield self._create_stream_chunk(
-                                    f"⚠️ 缓存失败: {cache_error}\n正在返回源链接...\n"
-                                )
-                    else:
-                        if stream:
-                            yield self._create_stream_chunk(
-                                "缓存已关闭,正在返回源链接...\n"
-                            )
+                    local_url = await self._archive_output(video_url, "video", response_state)
+                    if stream:
+                        yield self._create_stream_chunk("✅ 视频已永久保存到本机，可在「本机资源」查看\n")
 
                     # 更新数据库
                     task_id = operation["operation"]["name"]

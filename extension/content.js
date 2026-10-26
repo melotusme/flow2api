@@ -52,6 +52,13 @@ function getRecaptchaToken(action) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "flow2api_detect_email") {
+        const text = document.body?.innerText || "";
+        const candidates = [...text.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)]
+            .map(match => match[0].toLowerCase());
+        sendResponse({ email: candidates[0] || null });
+        return false;
+    }
     if (message.type === "get_token") {
         console.log("[Flow2API] Generating token for action: " + message.action);
         getRecaptchaToken(message.action)

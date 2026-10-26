@@ -625,6 +625,13 @@ class FlowFrontendMixin:
         cookie_header: str,
         timeout: int,
     ) -> str:
+        from ..core.config import config
+        if config.captcha_method == "ego_browser":
+            from .ego_browser_bridge import fetch_text
+            result = await fetch_text("GET", page_url, timeout=timeout)
+            if result["status"] != 200:
+                raise RuntimeError(f"Flow browser bootstrap failed: HTTP {result['status']}")
+            return result["text"]
         proxy_url = None
         if self.proxy_manager:
             if hasattr(self.proxy_manager, "get_request_proxy_url"):

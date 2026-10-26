@@ -677,6 +677,12 @@ class _FlowClientBase(FlowFrontendMixin):
         impersonate: str = "chrome",
     ) -> str:
         """执行原始文本请求（如 SSE），返回响应文本。"""
+        if config.captcha_method == "ego_browser" and urlparse(url).hostname == "flow.google.com":
+            from .ego_browser_bridge import fetch_text
+            result = await fetch_text(method, url, headers, raw_body if raw_body is not None else (json.dumps(json_data) if json_data is not None else None), timeout or self.timeout)
+            if result["status"] >= 400 and not return_error_response:
+                raise RuntimeError(f"Flow browser request failed: HTTP {result['status']}")
+            return result["text"]
         fingerprint = self._request_fingerprint_ctx.get()
 
         proxy_url = None
@@ -1054,7 +1060,7 @@ class _FlowClientBase(FlowFrontendMixin):
 
     def _get_control_plane_timeout(self) -> int:
         """控制轻量控制面请求的超时，避免认证/项目接口长时间挂起。"""
-        return max(5, min(int(self.timeout or 0) or 120, 10))
+        return max(5, min(int(self.timeout or 0) or 120, 30))
 
     def _get_video_submit_timeout(self) -> int:
         """视频提交接口应快速返回 operation，避免单次网络挂死拖满整条链路。"""
@@ -5129,6 +5135,12 @@ class _FlowClientBase(FlowFrontendMixin):
         debug_logger.log_info(
             f"[reCAPTCHA] 开始获取 token: method={captcha_method}, project_id={project_id}, action={action}"
         )
+
+        if captcha_method == "ego_browser":
+            from .ego_browser_bridge import get_captcha
+            result = await get_captcha(project_id, action)
+            self._set_request_fingerprint(result.get("fingerprint"))
+            return result["token"], None
 
         if captcha_method == "extension":
             try:

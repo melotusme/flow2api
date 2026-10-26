@@ -6,6 +6,10 @@ __pycache__/
 .Python
 env/
 venv/
+/venv
+.venv-icloud-backup/
+.venv-windows/
+.windows-launch.lock
 ENV/
 build/
 develop-eggs/

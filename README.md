@@ -73,6 +73,52 @@
 
 - 自动推送新版 Flow 登录态的浏览器扩展：[Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater)。
 
+- 本仓库内置 Flow 登录态同步工具：Chrome 扩展加载 `extension/`，或安装油猴脚本 `userscripts/flow2api-flow-login-sync.user.js`，详见 [`docs/flow-login-sync.md`](docs/flow-login-sync.md)。
+
+### 统一工作区与接入文档
+
+- 创作工作台：`http://127.0.0.1:8000/test`，模型搜索、功能/费用悬浮提示、参考图、视频续写、过程日志与作品预览。
+- 管理控制台：`http://127.0.0.1:8000/manage`，账号、配置与请求日志。
+- 网页接入文档：`http://127.0.0.1:8000/guide`，包含可复制 cURL、SSE 错误处理与 Magpie 设置（需管理员登录）。
+- 文件文档：[API 接入指南](docs/API-接入指南.md)。`GET /v1/models` 新增可选 `capabilities`，界面直接使用后端能力配置，不再猜测模型名称。
+- Magpie 本机注册脚本：`rtk proxy ./venv/bin/python scripts/connect_magpie.py` 预览，加 `--apply` 自动备份后写入。仅初始接入两个图片模型，不更改现有 Agent 默认模型。
+- 价格是注明日期的 Flow Pro 页面积分快照；未核价规格明确显示未知，不能按官方美元 API 价格换算。
+
+### macOS：直接使用已登录的 ego lite
+
+管理页「验证码方式」选择 `已登录的 ego lite 浏览器`（`ego_browser`）。该模式在现有 ego lite Flow 标签页中获取验证码并发送 Flow RPC，请保持 ego lite 和配置的工作区/标签页打开。
+
+在本机 `config/setting.toml` 的 `[captcha]` 下配置以下字段，重启服务生效。工作区和标签页须已授权给 ego-browser，并已打开 `https://flow.google.com`：
+
+```toml
+ego_browser_space_id = 10
+ego_browser_page_label = "p1"
+ego_browser_expected_email = "你的 Google 账号邮箱"
+```
+
+浏览器显示的账号必须与配置邮箱及所选 Token 的账号一致，否则停止请求。此模式不会启动独立 Chrome，也不会下载 Chromium。用户接管工作区后，需归还控制权才能继续调用。
+
+切换 Flow 项目会创建新页面文档。桥接器在每次导航前注册验证码初始化脚本，并在导航后检查初始化状态；旧页面的初始化标记不能作为新页面的就绪依据。
+如果网站提示「没有可用的 Token」，请在管理页检查 Token 是否启用；如果提示工作区由用户控制，请先在 ego lite 归还 Agent 控制权。工作区或绑定标签页关闭后，此模式无法继续生成。
+
+### macOS：使用已安装的 Chrome 启动独立打码会话
+
+- 管理页「系统配置 → 验证码方式」选择 `personal（内置浏览器打码）`，保存；在「Token 管理」导入有效的 Google/Flow 登录 Cookie。
+- `personal` 和 `browser` 均自动使用 `/Applications/Google Chrome.app` 或用户 Applications 目录中的 Chrome，无需第三方打码密钥，也不会自动下载 Chromium。找不到 Chrome 时直接报错。
+- 可以通过环境变量 `BROWSER_EXECUTABLE_PATH` 指定其他兼容浏览器的可执行文件。指定路径无效时直接报错。
+- 复用的是 Chrome 程序；打码服务维护独立浏览器会话，不会接管日常 Chrome/ego lite 中的标签页或自动继承其登录态。
+- `remote_browser` 需要专用 HTTP 打码服务；直接使用已登录 ego lite 请选上面的 `ego_browser`。
+- 配置好后发起图片/视频请求即可自动获取验证码。「打码测试/分数测试」仅用于诊断，成功与否仍需真实生成验证。
+
+```bash
+# 在项目目录中前台启动；Ctrl+C 停止
+rtk proxy ./start.sh
+# 另一终端验证本地服务
+rtk proxy curl -fsS -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8000/login
+```
+
+本机 `venv` 链接到 `~/Library/Application Support/flow2api/venv`，避免 iCloud 回收依赖；`start.sh` 将 Python 字节码缓存写到本机 Library/Caches。
+
 ### 方式一：Docker 部署（推荐）
 
 #### 标准模式（不使用代理）
@@ -611,3 +657,10 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 ## Star History
 
 [![Star History Chart](https://star-history.dera.page/svg?repos=TheSmallHanCat/flow2api&type=date&legend=top-left)](https://star-history.dera.page/#TheSmallHanCat/flow2api&type=date&legend=top-left)
+
+
+### 统一导航与自动保存
+
+登录后的所有页面均提供：创作工作台、本机资源、Token 管理、系统配置、请求日志、接入文档。
+
+成功交付的图片和视频统一永久保存到 `data/generated/`，不受 tmp 缓存开关和超时清理影响。打开 `http://127.0.0.1:8000/library` 可预览、下载、复制资源链接。保存路径是 Flow2API 所在电脑；远程客户端不会自动写入自己的下载目录。媒体链接采用文件内容哈希，持有链接即可读取，请保护私密作品链接。备份时请同时保留媒体文件及同名 JSON 记录。

@@ -124,7 +124,7 @@ class TokenManager:
         return True
 
     def _is_transient_network_failure(self, reason: Optional[str]) -> bool:
-        """判断刷新失败原因是否为网络/代理类瞬时错误。"""
+        """判断刷新失败是否来自网络、代理或不可用的浏览器运行环境。"""
         text = str(reason or "").strip()
         if not text:
             return False
@@ -140,6 +140,8 @@ class TokenManager:
         except Exception:
             pass
         transient_keywords = (
+            "ego-browser 操作失败",
+            "ego_browser 仅允许配置",
             "timed out",
             "timeout",
             "connection",
@@ -256,6 +258,7 @@ class TokenManager:
             token.st,
             project_name,
             google_cookies=token.google_cookies,
+            token_id=token.id,
         )
         debug_logger.log_info(
             f"[PROJECT] Created pooled project for token {token.id}: {project_name} ({project_id})"
@@ -1223,12 +1226,12 @@ class TokenManager:
         """
         token = await self.db.get_token(token_id)
         if not token:
-            return 0
+            raise ValueError("Token not found")
 
         # 确保AT有效
         token = await self.ensure_valid_token(token)
         if not token:
-            return 0
+            raise RuntimeError("登录态验证失败，未更新积分余额")
 
         try:
             result = await self.flow_client.get_credits(
@@ -1251,4 +1254,4 @@ class TokenManager:
             debug_logger.log_error(
                 f"Failed to refresh credits for token {token_id}: {str(e)}"
             )
-            return 0
+            raise

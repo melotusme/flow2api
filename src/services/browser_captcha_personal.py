@@ -34,6 +34,7 @@ from curl_cffi.requests import AsyncSession
 
 from ..core.logger import debug_logger
 from ..core.config import config
+from .browser_executable import resolve_local_browser_executable
 from .recaptcha_runtime import (
     TRUSTED_RECAPTCHA_HOOK_SOURCE as PERSONAL_TRUSTED_RECAPTCHA_HOOK_SOURCE,
     build_recaptcha_execute_script,
@@ -624,14 +625,7 @@ def _detect_real_browser_executable_path() -> Optional[str]:
 
 def _resolve_browser_executable_path() -> tuple[Optional[str], str]:
     """解析浏览器优先级：环境变量 > auto。"""
-    browser_executable_path = (
-        os.environ.get("BROWSER_EXECUTABLE_PATH", "").strip() or None
-    )
-    if browser_executable_path and not os.path.exists(browser_executable_path):
-        debug_logger.log_warning(
-            f"[BrowserCaptcha] 指定浏览器不存在，改回 nodriver 默认浏览器解析: {browser_executable_path}"
-        )
-        browser_executable_path = None
+    browser_executable_path = resolve_local_browser_executable()
 
     if browser_executable_path:
         normalized = os.path.normpath(browser_executable_path)

@@ -1417,6 +1417,48 @@ async def import_tokens(
     }
 
 
+@router.post("/api/browser-login/sync")
+async def sync_browser_login(
+    request: PluginTokenUpdateRequest, token: str = Depends(verify_admin_token)
+):
+    """Validate the actual cookie owner, then update credentials only.
+
+    Admission must work before a token or project exists, and must not borrow
+    the account configured for ego generation or create projects as a side effect.
+    """
+    from datetime import timedelta
+    from ..services.protocol_login import protocol_loginer
+
+    proxy = await proxy_manager.get_proxy_url() if proxy_manager else None
+    result = await protocol_loginer.login(
+        request.google_cookies, proxy=proxy, email=request.login_account
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Flow 登录态验证失败")
+    cookies = result["google_cookies"]
+    email = result["email"].lower()
+    existing = await db.get_token_by_email(email)
+    expires = datetime.now(timezone.utc) + timedelta(minutes=55)
+    if existing:
+        await token_manager.update_token(
+            existing.id, st=result["session_token"],
+            at="flow-frontend-cookie", at_expires=expires,
+            google_cookies=cookies, login_account=email, protocol_mode="protocol",
+        )
+        token_id = existing.id
+    else:
+        new_token = Token(
+            st=result["session_token"], at="flow-frontend-cookie", at_expires=expires,
+            email=email, login_account=email, google_cookies=cookies,
+            protocol_mode="protocol", remark="浏览器登录态同步",
+        )
+        token_id = await db.add_token(new_token)
+        if concurrency_manager:
+            await concurrency_manager.reset_token(token_id, image_concurrency=-1, video_concurrency=-1)
+    return {"success": True, "email": email, "token_id": token_id,
+            "added": int(existing is None), "updated": int(existing is not None)}
+
+
 # ========== Config Management ==========
 
 

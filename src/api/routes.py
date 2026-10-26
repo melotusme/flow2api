@@ -822,12 +822,14 @@ async def _iterate_gemini_stream(
 @router.get("/v1/models")
 async def list_models(api_key: str = Depends(verify_api_key_flexible)):
     """List available models."""
+    from ..services.model_metadata import describe_model
     models = [
         {
             "id": model["id"],
             "object": "model",
             "owned_by": "flow2api",
             "description": model["description"],
+            "capabilities": describe_model(model["id"], MODEL_CONFIG[model["id"]]),
         }
         for model in _get_openai_model_catalog()
     ]

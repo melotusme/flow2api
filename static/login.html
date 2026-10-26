@@ -12,32 +12,33 @@
     <script>
         tailwind.config={theme:{extend:{colors:{border:"hsl(0 0% 89%)",input:"hsl(0 0% 89%)",ring:"hsl(0 0% 3.9%)",background:"hsl(0 0% 100%)",foreground:"hsl(0 0% 3.9%)",primary:{DEFAULT:"hsl(0 0% 9%)",foreground:"hsl(0 0% 98%)"},secondary:{DEFAULT:"hsl(0 0% 96.1%)",foreground:"hsl(0 0% 9%)"},muted:{DEFAULT:"hsl(0 0% 96.1%)",foreground:"hsl(0 0% 45.1%)"},destructive:{DEFAULT:"hsl(0 84.2% 60.2%)",foreground:"hsl(0 0% 98%)"}}}}}
     </script>
+    <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body class="h-full bg-background text-foreground antialiased">
     <div class="flex min-h-full flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
         <div class="sm:mx-auto sm:w-full sm:max-w-md">
             <div class="text-center">
                 <h1 class="text-4xl font-bold">Flow2API</h1>
-                <p class="mt-2 text-sm text-muted-foreground">管理员控制台</p>
+                <p class="mt-2 text-sm text-muted-foreground">登录你的创作与管理工作区</p>
             </div>
         </div>
 
         <div class="sm:mx-auto sm:w-full sm:max-w-md">
-            <div class="bg-background py-8 px-4 sm:px-10 rounded-lg">
+            <div class="login-card">
                 <form id="loginForm" class="space-y-6">
                     <div class="space-y-2">
                         <label for="username" class="text-sm font-medium">账户</label>
-                        <input type="text" id="username" name="username" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" placeholder="请输入账户">
+                        <input type="text" id="username" name="username" autocomplete="username" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" placeholder="请输入账户">
                     </div>
                     <div class="space-y-2">
                         <label for="password" class="text-sm font-medium">密码</label>
-                        <input type="password" id="password" name="password" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" placeholder="请输入密码">
+                        <input type="password" id="password" name="password" autocomplete="current-password" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" placeholder="请输入密码">
                     </div>
                     <button type="submit" id="loginButton" class="inline-flex items-center justify-center rounded-md font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-10 w-full disabled:opacity-50">登录</button>
                 </form>
 
                 <div class="mt-6 text-center text-xs text-muted-foreground">
-                    <p>Flow2API © 2025</p>
+                    <p>Flow2API · 图片与视频工作区</p>
                 </div>
             </div>
         </div>

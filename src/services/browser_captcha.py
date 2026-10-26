@@ -32,6 +32,7 @@ from ..core.browser_runtime_status import (
     progress_runtime_prepare,
 )
 from ..core.config import config
+from .browser_executable import resolve_local_browser_executable
 from .recaptcha_runtime import TRUSTED_RECAPTCHA_HOOK_SOURCE, build_recaptcha_execute_script
 from .browser_cookie_utils import build_browser_cookie_targets, build_cookie_signature, is_partitioned_cookie
 
@@ -184,6 +185,11 @@ def _ensure_playwright_installed() -> bool:
 
 def _ensure_browser_installed() -> bool:
     """确保 chromium 浏览器已安装"""
+    local_browser = resolve_local_browser_executable()
+    if local_browser:
+        debug_logger.log_info(f"[BrowserCaptcha] 使用已安装的浏览器，不下载 Chromium: {local_browser}")
+        finish_runtime_prepare("browser", "使用本机已安装的浏览器，无需下载 Chromium。")
+        return True
     try:
         detect_script = (
             "from playwright.sync_api import sync_playwright\n"
@@ -1564,9 +1570,7 @@ class TokenBrowser:
         if manage_slot_pid:
             await self._cleanup_stale_slot_process()
         playwright = await async_playwright().start()
-        browser_executable_path = (
-            os.environ.get("BROWSER_EXECUTABLE_PATH", "").strip() or None
-        )
+        browser_executable_path = resolve_local_browser_executable()
         proxy_option, raw_proxy_url, _ = await self._resolve_proxy_runtime_config(
             token_proxy_url=token_proxy_url
         )

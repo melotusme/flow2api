@@ -104,6 +104,13 @@ class CurrentFlowClientMixin:
         source_path: Optional[str] = None,
         timeout: Optional[int] = None,
     ) -> Any:
+        runtime_config = self._get_runtime_config()
+        if runtime_config.captcha_method == "ego_browser":
+            expected = str(runtime_config.get_raw_config().get("captcha", {}).get("ego_browser_expected_email", "")).strip().casefold()
+            account = await self.db.get_token(token_id) if token_id and self.db else None
+            account_email = str((account.login_account or account.email) if account else "").strip().casefold()
+            if not expected or account_email != expected:
+                raise RuntimeError("ego_browser 仅允许配置的同一账号调用，请核对 Token 与浏览器账号")
         cookie_storage = await self._resolve_flow_frontend_cookie_storage(
             google_cookies=google_cookies,
             token_id=token_id,
@@ -145,11 +152,13 @@ class CurrentFlowClientMixin:
         st: str,
         title: str,
         google_cookies: Optional[str] = None,
+        token_id: Optional[int] = None,
     ) -> str:
         payload = await self._current_rpc(
             rpc_id="jHPbke",
             argument=["projects/*", [None, [title]], [None, 22]],
             google_cookies=google_cookies,
+            token_id=token_id,
             timeout=max(self._get_control_plane_timeout(), 20),
         )
         project_id = self._extract_flow_project_id(payload)

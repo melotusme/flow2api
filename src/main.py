@@ -5,7 +5,7 @@ import os
 import sys
 import warnings
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -298,6 +298,7 @@ app.mount("/tmp", StaticFiles(directory=str(tmp_dir)), name="tmp")
 
 # HTML routes for frontend
 static_path = Path(__file__).parent.parent / "static"
+app.mount("/assets", StaticFiles(directory=str(static_path / "assets")), name="assets")
 _STATIC_PAGE_NO_CACHE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate",
     "Pragma": "no-cache",
@@ -351,6 +352,43 @@ async def test_page(request: Request):
     if test_file.exists():
         return _static_page_response(test_file)
     return HTMLResponse(content="<h1>Test Page Not Found</h1>", status_code=404)
+
+
+@app.get("/guide", response_class=HTMLResponse)
+async def guide_page(request: Request):
+    guard_response = _ensure_admin_page_session(request)
+    if guard_response is not None:
+        return guard_response
+    return _static_page_response(static_path / "guide.html")
+
+
+@app.get("/library", response_class=HTMLResponse)
+async def library_page(request: Request):
+    guard = _ensure_admin_page_session(request)
+    if guard is not None:
+        return guard
+    return _static_page_response(static_path / "library.html")
+
+
+@app.get("/api/library")
+async def library_items(request: Request):
+    guard = _ensure_admin_page_session(request)
+    if guard is not None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    from .services.media_archive import MediaArchive
+    archive = MediaArchive()
+    return {"directory": str(archive.directory.resolve()), "items": archive.list_items()}
+
+
+@app.get("/media/{filename}")
+async def generated_media(filename: str, download: bool = False):
+    # A content hash URL is a bearer link, allowing Magpie and API clients to fetch it.
+    from .services.media_archive import MediaArchive
+    path = MediaArchive().resolve(filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="资源不存在")
+    return FileResponse(path, filename=filename if download else None,
+                        content_disposition_type="attachment" if download else "inline")
 
 
 @app.get("/metrics")
