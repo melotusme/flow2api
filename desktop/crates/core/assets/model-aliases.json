@@ -1,0 +1,306 @@
+{
+  "IMAGE_BASE_MODELS": {
+    "gemini-3.0-pro-image": "gemini-3.0-pro-image",
+    "gemini-3.1-flash-image": "gemini-3.1-flash-image",
+    "gemini-3.1-flash-lite-image": "gemini-3.1-flash-lite-image"
+  },
+  "ASPECT_RATIO_MAP": {
+    "16:9": "landscape",
+    "9:16": "portrait",
+    "1:1": "square",
+    "4:3": "four-three",
+    "3:4": "three-four",
+    "landscape": "landscape",
+    "portrait": "portrait",
+    "square": "square",
+    "four-three": "four-three",
+    "three-four": "three-four",
+    "four_three": "four-three",
+    "three_four": "three-four",
+    "LANDSCAPE": "landscape",
+    "PORTRAIT": "portrait",
+    "SQUARE": "square"
+  },
+  "MODEL_SUPPORTED_ASPECTS": {
+    "gemini-3.0-pro-image": [
+      "landscape",
+      "portrait",
+      "square",
+      "four-three",
+      "three-four"
+    ],
+    "gemini-3.1-flash-image": [
+      "landscape",
+      "portrait",
+      "square",
+      "four-three",
+      "three-four"
+    ],
+    "gemini-3.1-flash-lite-image": [
+      "landscape",
+      "portrait",
+      "square",
+      "four-three",
+      "three-four"
+    ]
+  },
+  "MODEL_SUPPORTED_SIZES": {
+    "gemini-3.0-pro-image": [
+      "2k",
+      "4k"
+    ],
+    "gemini-3.1-flash-image": [
+      "2k",
+      "4k"
+    ],
+    "gemini-3.1-flash-lite-image": [
+      "2k",
+      "4k"
+    ]
+  },
+  "IMAGE_SIZE_MAP": {
+    "1k": "1k",
+    "1K": "1k",
+    "2k": "2k",
+    "2K": "2k",
+    "4k": "4k",
+    "4K": "4k",
+    "1080p": "1080p",
+    "1080P": "1080p",
+    "": ""
+  },
+  "OPENAI_QUALITY_MAP": {
+    "low": null,
+    "standard": null,
+    "medium": "2k",
+    "high": "4k",
+    "hd": "4k",
+    "ultra": "4k"
+  },
+  "VIDEO_BASE_MODELS": {
+    "veo_3_1_t2v_fast": {
+      "landscape": "veo_3_1_t2v_fast_landscape",
+      "portrait": "veo_3_1_t2v_fast_portrait"
+    },
+    "veo_3_1_t2v_fast_4s": {
+      "landscape": "veo_3_1_t2v_fast_4s",
+      "portrait": "veo_3_1_t2v_fast_portrait_4s"
+    },
+    "veo_3_1_t2v_fast_6s": {
+      "landscape": "veo_3_1_t2v_fast_6s",
+      "portrait": "veo_3_1_t2v_fast_portrait_6s"
+    },
+    "veo_3_1_t2v_fast_8s": {
+      "landscape": "veo_3_1_t2v_fast_8s",
+      "portrait": "veo_3_1_t2v_fast_portrait_8s"
+    },
+    "veo_3_1_t2v_fast_ultra": {
+      "landscape": "veo_3_1_t2v_fast_ultra",
+      "portrait": "veo_3_1_t2v_fast_portrait_ultra"
+    },
+    "veo_3_1_t2v_fast_ultra_relaxed": {
+      "landscape": "veo_3_1_t2v_fast_ultra_relaxed",
+      "portrait": "veo_3_1_t2v_fast_portrait_ultra_relaxed"
+    },
+    "veo_3_1_t2v": {
+      "landscape": "veo_3_1_t2v_landscape",
+      "portrait": "veo_3_1_t2v_portrait"
+    },
+    "veo_3_1_t2v_4s": {
+      "landscape": "veo_3_1_t2v_4s",
+      "portrait": "veo_3_1_t2v_portrait_4s"
+    },
+    "veo_3_1_t2v_6s": {
+      "landscape": "veo_3_1_t2v_6s",
+      "portrait": "veo_3_1_t2v_portrait_6s"
+    },
+    "veo_3_1_t2v_8s": {
+      "landscape": "veo_3_1_t2v_8s",
+      "portrait": "veo_3_1_t2v_portrait_8s"
+    },
+    "veo_3_1_t2v_4s_4k": {
+      "landscape": "veo_3_1_t2v_4s_4k",
+      "portrait": "veo_3_1_t2v_portrait_4s_4k"
+    },
+    "veo_3_1_t2v_4s_1080p": {
+      "landscape": "veo_3_1_t2v_4s_1080p",
+      "portrait": "veo_3_1_t2v_portrait_4s_1080p"
+    },
+    "veo_3_1_t2v_6s_4k": {
+      "landscape": "veo_3_1_t2v_6s_4k",
+      "portrait": "veo_3_1_t2v_portrait_6s_4k"
+    },
+    "veo_3_1_t2v_6s_1080p": {
+      "landscape": "veo_3_1_t2v_6s_1080p",
+      "portrait": "veo_3_1_t2v_portrait_6s_1080p"
+    },
+    "veo_3_1_t2v_8s_4k": {
+      "landscape": "veo_3_1_t2v_8s_4k",
+      "portrait": "veo_3_1_t2v_portrait_8s_4k"
+    },
+    "veo_3_1_t2v_8s_1080p": {
+      "landscape": "veo_3_1_t2v_8s_1080p",
+      "portrait": "veo_3_1_t2v_portrait_8s_1080p"
+    },
+    "veo_3_1_t2v_4k": {
+      "landscape": "veo_3_1_t2v_4k",
+      "portrait": "veo_3_1_t2v_portrait_4k"
+    },
+    "veo_3_1_t2v_1080p": {
+      "landscape": "veo_3_1_t2v_1080p",
+      "portrait": "veo_3_1_t2v_portrait_1080p"
+    },
+    "veo_3_1_t2v_lite": {
+      "landscape": "veo_3_1_t2v_lite_landscape",
+      "portrait": "veo_3_1_t2v_lite_portrait"
+    },
+    "veo_3_1_t2v_lite_4s": {
+      "landscape": "veo_3_1_t2v_lite_4s_landscape",
+      "portrait": "veo_3_1_t2v_lite_4s_portrait"
+    },
+    "veo_3_1_t2v_lite_6s": {
+      "landscape": "veo_3_1_t2v_lite_6s_landscape",
+      "portrait": "veo_3_1_t2v_lite_6s_portrait"
+    },
+    "veo_3_1_t2v_lite_8s": {
+      "landscape": "veo_3_1_t2v_lite_8s_landscape",
+      "portrait": "veo_3_1_t2v_lite_8s_portrait"
+    },
+    "omni": {
+      "landscape": "omni",
+      "portrait": "omni_portrait"
+    },
+    "veo_3_1_i2v_s_fast_fl": {
+      "landscape": "veo_3_1_i2v_s_fast_fl",
+      "portrait": "veo_3_1_i2v_s_fast_portrait_fl"
+    },
+    "veo_3_1_i2v_s_fast_4s_fl": {
+      "landscape": "veo_3_1_i2v_s_fast_4s_fl",
+      "portrait": "veo_3_1_i2v_s_fast_portrait_4s_fl"
+    },
+    "veo_3_1_i2v_s_fast_6s_fl": {
+      "landscape": "veo_3_1_i2v_s_fast_6s_fl",
+      "portrait": "veo_3_1_i2v_s_fast_portrait_6s_fl"
+    },
+    "veo_3_1_i2v_s_fast_8s_fl": {
+      "landscape": "veo_3_1_i2v_s_fast_8s_fl",
+      "portrait": "veo_3_1_i2v_s_fast_portrait_8s_fl"
+    },
+    "veo_3_1_i2v_s_fast_ultra_fl": {
+      "landscape": "veo_3_1_i2v_s_fast_ultra_fl",
+      "portrait": "veo_3_1_i2v_s_fast_portrait_ultra_fl"
+    },
+    "veo_3_1_i2v_s_fast_ultra_relaxed": {
+      "landscape": "veo_3_1_i2v_s_fast_ultra_relaxed",
+      "portrait": "veo_3_1_i2v_s_fast_portrait_ultra_relaxed"
+    },
+    "veo_3_1_i2v_s": {
+      "landscape": "veo_3_1_i2v_s_landscape",
+      "portrait": "veo_3_1_i2v_s_portrait"
+    },
+    "veo_3_1_i2v_s_4s": {
+      "landscape": "veo_3_1_i2v_s_4s",
+      "portrait": "veo_3_1_i2v_s_portrait_4s"
+    },
+    "veo_3_1_i2v_s_6s": {
+      "landscape": "veo_3_1_i2v_s_6s",
+      "portrait": "veo_3_1_i2v_s_portrait_6s"
+    },
+    "veo_3_1_i2v_s_8s": {
+      "landscape": "veo_3_1_i2v_s_8s",
+      "portrait": "veo_3_1_i2v_s_portrait_8s"
+    },
+    "veo_3_1_i2v_s_4s_4k": {
+      "landscape": "veo_3_1_i2v_s_4s_4k",
+      "portrait": "veo_3_1_i2v_s_portrait_4s_4k"
+    },
+    "veo_3_1_i2v_s_4s_1080p": {
+      "landscape": "veo_3_1_i2v_s_4s_1080p",
+      "portrait": "veo_3_1_i2v_s_portrait_4s_1080p"
+    },
+    "veo_3_1_i2v_s_6s_4k": {
+      "landscape": "veo_3_1_i2v_s_6s_4k",
+      "portrait": "veo_3_1_i2v_s_portrait_6s_4k"
+    },
+    "veo_3_1_i2v_s_6s_1080p": {
+      "landscape": "veo_3_1_i2v_s_6s_1080p",
+      "portrait": "veo_3_1_i2v_s_portrait_6s_1080p"
+    },
+    "veo_3_1_i2v_s_8s_4k": {
+      "landscape": "veo_3_1_i2v_s_8s_4k",
+      "portrait": "veo_3_1_i2v_s_portrait_8s_4k"
+    },
+    "veo_3_1_i2v_s_8s_1080p": {
+      "landscape": "veo_3_1_i2v_s_8s_1080p",
+      "portrait": "veo_3_1_i2v_s_portrait_8s_1080p"
+    },
+    "veo_3_1_i2v_s_4k": {
+      "landscape": "veo_3_1_i2v_s_4k",
+      "portrait": "veo_3_1_i2v_s_portrait_4k"
+    },
+    "veo_3_1_i2v_s_1080p": {
+      "landscape": "veo_3_1_i2v_s_1080p",
+      "portrait": "veo_3_1_i2v_s_portrait_1080p"
+    },
+    "veo_3_1_i2v_lite": {
+      "landscape": "veo_3_1_i2v_lite_landscape",
+      "portrait": "veo_3_1_i2v_lite_portrait"
+    },
+    "veo_3_1_i2v_lite_4s": {
+      "landscape": "veo_3_1_i2v_lite_4s_landscape",
+      "portrait": "veo_3_1_i2v_lite_4s_portrait"
+    },
+    "veo_3_1_i2v_lite_6s": {
+      "landscape": "veo_3_1_i2v_lite_6s_landscape",
+      "portrait": "veo_3_1_i2v_lite_6s_portrait"
+    },
+    "veo_3_1_i2v_lite_8s": {
+      "landscape": "veo_3_1_i2v_lite_8s_landscape",
+      "portrait": "veo_3_1_i2v_lite_8s_portrait"
+    },
+    "veo_3_1_interpolation_lite": {
+      "landscape": "veo_3_1_interpolation_lite_landscape",
+      "portrait": "veo_3_1_interpolation_lite_portrait"
+    },
+    "veo_3_1_interpolation_lite_4s": {
+      "landscape": "veo_3_1_interpolation_lite_4s_landscape",
+      "portrait": "veo_3_1_interpolation_lite_4s_portrait"
+    },
+    "veo_3_1_interpolation_lite_6s": {
+      "landscape": "veo_3_1_interpolation_lite_6s_landscape",
+      "portrait": "veo_3_1_interpolation_lite_6s_portrait"
+    },
+    "veo_3_1_interpolation_lite_8s": {
+      "landscape": "veo_3_1_interpolation_lite_8s_landscape",
+      "portrait": "veo_3_1_interpolation_lite_8s_portrait"
+    },
+    "veo_3_1_r2v_fast": {
+      "landscape": "veo_3_1_r2v_fast",
+      "portrait": "veo_3_1_r2v_fast_portrait"
+    },
+    "veo_3_1_r2v_fast_8s": {
+      "landscape": "veo_3_1_r2v_fast_8s",
+      "portrait": "veo_3_1_r2v_fast_portrait_8s"
+    },
+    "veo_3_1_r2v_fast_ultra": {
+      "landscape": "veo_3_1_r2v_fast_ultra",
+      "portrait": "veo_3_1_r2v_fast_portrait_ultra"
+    },
+    "veo_3_1_r2v_fast_ultra_8s": {
+      "landscape": "veo_3_1_r2v_fast_ultra_8s",
+      "portrait": "veo_3_1_r2v_fast_portrait_ultra_8s"
+    },
+    "veo_3_1_r2v_fast_ultra_relaxed": {
+      "landscape": "veo_3_1_r2v_fast_ultra_relaxed",
+      "portrait": "veo_3_1_r2v_fast_portrait_ultra_relaxed"
+    },
+    "veo_3_1_r2v_fast_ultra_relaxed_8s": {
+      "landscape": "veo_3_1_r2v_fast_ultra_relaxed_8s",
+      "portrait": "veo_3_1_r2v_fast_portrait_ultra_relaxed_8s"
+    },
+    "veo_3_1_extend": {
+      "landscape": "veo_3_1_extend",
+      "portrait": "veo_3_1_extend_portrait"
+    }
+  }
+}

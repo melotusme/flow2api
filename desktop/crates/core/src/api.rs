@@ -145,42 +145,7 @@ async fn completions(
     Ok(Json(json!({"id":task.id,"object":"chat.completion","created":chrono::Utc::now().timestamp(),"model":task.request.model,"choices":[{"index":0,"message":{"role":"assistant","content":content},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}})).into_response())
 }
 fn resolve_model(id: &str, body: &Value) -> String {
-    if catalog::catalog().get(id).is_some() {
-        return id.into();
-    }
-    if [
-        "gemini-3.1-flash-image",
-        "gemini-3.1-flash-lite-image",
-        "gemini-3.0-pro-image",
-    ]
-    .contains(&id)
-    {
-        let image_config = &body["generationConfig"]["imageConfig"];
-        let ratio = image_config["aspectRatio"]
-            .as_str()
-            .or_else(|| body["aspectRatio"].as_str())
-            .unwrap_or("1:1");
-        let suffix = match ratio {
-            "16:9" => "landscape",
-            "9:16" => "portrait",
-            "4:3" => "four-three",
-            "3:4" => "three-four",
-            _ => "square",
-        };
-        let size = image_config["imageSize"]
-            .as_str()
-            .or_else(|| body["imageSize"].as_str())
-            .unwrap_or("");
-        return format!(
-            "{id}-{suffix}{}",
-            match size.to_uppercase().as_str() {
-                "4K" => "-4k",
-                "2K" => "-2k",
-                _ => "",
-            }
-        );
-    }
-    id.into()
+    crate::resolver::resolve(id, body)
 }
 async fn wait_task(app: &App, id: &str) -> Result<Task, ApiError> {
     loop {

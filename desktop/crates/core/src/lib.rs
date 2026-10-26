@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod flow;
 pub mod generation;
 pub mod model;
+pub mod resolver;
 pub mod store;
 
 use anyhow::{bail, Result};
