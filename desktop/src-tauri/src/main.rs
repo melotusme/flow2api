@@ -1,4 +1,4 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 fn main() {
-    flow2api_desktop::run()
+    flow2api_desktop_lib::run()
 }

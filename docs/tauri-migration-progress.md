@@ -13,7 +13,7 @@
 
 ## 必须继续完成并取得证据
 
-- [x] 当前 Mac 上核心、桌面工程编译检查通过，Cargo.lock 锁定依赖；Windows 构建仍待验证。
+- [x] 当前 Mac 上核心、桌面工程编译检查通过，Cargo.lock 锁定依赖；Windows MSVC 交叉编译及 NSIS 打包通过，Windows 原生构建与运行仍待验证。
 - [x] 当前核心 26 项测试、1 项真实 Chrome 恢复测试与 3 项 Postman 媒体传输模拟通过；不涵盖完整生成链路。
 - [ ] macOS 窗口、菜单栏、隐藏恢复、状态变化、退出释放端口与浏览器实测。
 - [ ] Windows 编译、安装、WebView2、中文路径、托盘、隐藏恢复与退出实测。
@@ -57,3 +57,8 @@
 - 2026-10-27：新增模型别名列表、Gemini 单模型查询、描述／版本等元数据及 Gemini code/message/status 错误形状，含非法 JSON／鉴权／未知模型。3 项新增常规测试通过，完整核心共 26 项通过、4 项环境测试默认忽略。历史参考图 Postman 测试已显式执行通过，日志确认依次 503 与 200 PNG，未访问真实 Flow。
 - 2026-10-27：修正双端 CI 的锁文件参数转发，并在上传 macOS app 前使用 ditto 压缩，避免 artifact 丢失可执行权限／符号链接；新增前端语法检查。CI 未触发。Mac arm64 本地 build／重新打包通过，生成开发 ZIP 并核对其中主程序模式为 0755。
 - 2026-10-27：Intel Mac x86_64 目标实际编译通过，使用 lipo 合成 arm64 + x86_64 通用程序并由 Tauri 打包。file 确认两种架构；当前 Apple Silicon Mac 上启动通用 app，进程路径指向通用包，health healthy，随后显式退出。生成 dist/flow2api-macos-universal-debug-20261027.zip 并验证 ZIP 内主程序可执行权限与 fat-binary 头。Intel Mac 实机、签名、公证仍未验证。
+
+- 2026-10-27：通过独立 Rust 1.93.0 工具链、cargo-xwin 0.23.1、LLVM/LLD 23.1.4、Microsoft CRT/SDK 完成 Windows x86_64-pc-windows-msvc release 编译。首次发现库与 EXE 的 PDB 文件重名，改库名为 flow2api_desktop_lib 后重编译不再冲突；Mac 桌面也重新编译通过。
+- 2026-10-27：使用 makensis 3.13 在 Mac 上通过 Tauri 交叉生成 NSIS 安装器并复制至 dist/Flow2API_0.1.0_x64-setup.exe。生成脚本确认为 currentUser、WebView2 下载引导；卸载删除应用数据需要勾选。PE 检查桌面程序为 x64 GUI，无外置 VC++／SQLite／Python DLL 导入。安装器引导本身为 32 位 NSIS，内含 x64 应用。没有 Windows 实际运行证据，Windows 验收项保持未勾选。
+- 2026-10-27：新增 desktop/scripts/cross-windows.sh 与 docs/windows-cross-build.md，记录旧镜像 404 的隔离缓存／工具链处理、NSIS 插件 TLS EOF 后固定校验值的下载恢复及 Windows 实机验收步骤。未修改全局 Cargo 配置和默认 Rust 工具链。
+- 2026-10-27：从 /tmp 使用完整环境变量重新运行 cross-windows.sh --offline，release 构建与 NSIS 打包成功，安装器约 5 MB；dist 中提供对应 SHA256 文件。该脚本重跑不需要 GitHub 推送权限，不依赖尚未触发的 CI。
