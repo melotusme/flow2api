@@ -15,7 +15,10 @@ use anyhow::{bail, Result};
 use model::*;
 use std::{
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 
@@ -31,6 +34,8 @@ pub struct App {
     server: AsyncMutex<Option<Server>>,
     pub browsers: browser::BrowserPool,
     pub job_gate: AsyncMutex<()>,
+    shutting_down: AtomicBool,
+    shutdown_gate: AsyncMutex<()>,
     pub workers: Arc<tokio::sync::Semaphore>,
 }
 
@@ -54,6 +59,8 @@ impl App {
             updates,
             server: AsyncMutex::new(None),
             job_gate: AsyncMutex::new(()),
+            shutting_down: AtomicBool::new(false),
+            shutdown_gate: AsyncMutex::new(()),
             workers,
         });
         app.refresh()?;
@@ -90,8 +97,18 @@ impl App {
         });
         Ok(())
     }
+    pub(crate) fn ensure_available(&self) -> Result<()> {
+        if self.shutting_down.load(Ordering::SeqCst) {
+            bail!("应用正在退出，请重新打开 Flow2API");
+        }
+        Ok(())
+    }
     pub async fn start_service(self: &Arc<Self>) -> Result<Status> {
         let _admission = self.job_gate.lock().await;
+        self.ensure_available()?;
+        if self.status().service == "stopping" {
+            bail!("API 正在停止，请稍后再启动");
+        }
         let mut slot = self.server.lock().await;
         if slot.as_ref().is_some_and(|v| !v.done.is_finished()) {
             return Ok(self.status());
@@ -138,27 +155,53 @@ impl App {
         Ok(self.status())
     }
     pub async fn stop_service(&self) -> Result<Status> {
-        let _admission = self.job_gate.lock().await;
-        // Serialize lifecycle with starts and keep the actual listener's join handle.
+        let admission = self.job_gate.lock().await;
+        self.stop_service_locked(admission).await
+    }
+    async fn stop_service_locked(
+        &self,
+        admission: tokio::sync::MutexGuard<'_, ()>,
+    ) -> Result<Status> {
         let mut slot = self.server.lock().await;
         if self.status().busy() {
             bail!("仍有执行或排队任务，请等待完成后停止服务");
         }
-        if let Some(server) = slot.take() {
+        if self.status().service == "stopping" {
+            bail!("API 正在停止，请稍后再试");
+        }
+        let server = slot.take();
+        if server.is_some() {
             self.change_status(|s| s.service = "stopping".into());
+        }
+        drop(slot);
+        // In-flight HTTP submissions must acquire admission, observe stopping,
+        // and return before graceful shutdown can finish. Never join under it.
+        drop(admission);
+        if let Some(server) = server {
             let _ = server.shutdown.send(());
             server.done.await?;
         }
         Ok(self.status())
     }
     pub async fn shutdown(&self) -> Result<()> {
-        self.stop_service().await?;
+        let _shutdown = self.shutdown_gate.lock().await;
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let admission = self.job_gate.lock().await;
+        self.shutting_down.store(true, Ordering::SeqCst);
+        if let Err(error) = self.stop_service_locked(admission).await {
+            // Busy-task rejection leaves the application usable.
+            self.shutting_down.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
         self.browsers.close_all().await;
         self.change_status(|s| s.browser = "已关闭".into());
         Ok(())
     }
     pub async fn save_settings(&self, settings: Settings) -> Result<()> {
         let _admission = self.job_gate.lock().await;
+        self.ensure_available()?;
         if self.status().busy() || self.status().service == "running" {
             bail!("请先停止 API，再修改运行设置");
         }

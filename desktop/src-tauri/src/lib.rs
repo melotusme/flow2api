@@ -15,6 +15,7 @@ use tauri_plugin_opener::OpenerExt;
 struct Desktop {
     core: Arc<App>,
     quitting: AtomicBool,
+    quit_in_progress: AtomicBool,
 }
 fn result<T>(core: &App, value: anyhow::Result<T>) -> Result<T, String> {
     value.map_err(|error| {
@@ -240,6 +241,13 @@ fn show(app: &tauri::AppHandle) {
     }
 }
 fn request_quit(app: &tauri::AppHandle) {
+    if app
+        .state::<Desktop>()
+        .quit_in_progress
+        .swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<Desktop>();
@@ -249,6 +257,7 @@ fn request_quit(app: &tauri::AppHandle) {
                 app.exit(0);
             }
             Err(error) => {
+                state.quit_in_progress.store(false, Ordering::SeqCst);
                 show(&app);
                 let _ = app.emit("notice", format!("无法退出：{error}"));
             }
@@ -293,6 +302,7 @@ pub fn run() {
             app.manage(Desktop {
                 core: core.clone(),
                 quitting: AtomicBool::new(false),
+                quit_in_progress: AtomicBool::new(false),
             });
             let summary =
                 MenuItem::with_id(app, "summary", status.tray_summary(), false, None::<&str>)?;

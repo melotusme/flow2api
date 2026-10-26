@@ -554,6 +554,61 @@ mod tests {
                 .len()
                 > 30
         );
+        // Ordinary API stop is reversible; application shutdown is terminal.
+        app.stop_service().await?;
+        app.start_service().await?;
+        let mut pending = Task {
+            id: uuid::Uuid::new_v4().to_string(),
+            request: GenerationRequest {
+                model: "gemini-3.1-flash-image-square".into(),
+                prompt: "pending fixture".into(),
+                account_id: None,
+                images: vec![],
+                video_id: None,
+            },
+            state: "queued".into(),
+            stage: "等待执行".into(),
+            created_at: now(),
+            updated_at: now(),
+            error: None,
+            results: vec![],
+        };
+        app.store.save_task(&pending)?;
+        app.refresh()?;
+        assert!(app.shutdown().await.is_err());
+        assert_eq!(app.status().service, "running");
+        assert_eq!(
+            client
+                .get(format!("{address}/health"))
+                .send()
+                .await?
+                .status(),
+            200
+        );
+        pending.state = "interrupted".into();
+        app.store.save_task(&pending)?;
+        app.refresh()?;
+        app.shutdown().await?;
+        assert!(app
+            .start_service()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("正在退出"));
+        assert!(app
+            .open_login("unused")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("正在退出"));
+        assert!(app
+            .sync_account("unused")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("正在退出"));
+        assert!(app.save_settings(app.store.settings()?).await.is_err());
+        // Repeated shutdown requests remain harmless.
         app.shutdown().await?;
         assert_eq!(app.status().service, "stopped");
         assert!(

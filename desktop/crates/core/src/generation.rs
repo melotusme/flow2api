@@ -49,6 +49,7 @@ impl App {
     }
     pub async fn open_login(&self, id: &str) -> Result<()> {
         let _admission = self.job_gate.lock().await;
+        self.ensure_available()?;
         if self.status().busy() {
             bail!("请等待生成任务完成后打开登录窗口");
         }
@@ -68,6 +69,7 @@ impl App {
     }
     pub async fn sync_account(&self, id: &str) -> Result<Account> {
         let _admission = self.job_gate.lock().await;
+        self.ensure_available()?;
         if self.status().busy() {
             bail!("请等待生成任务完成后同步账号");
         }
@@ -94,6 +96,7 @@ impl App {
     }
     pub async fn submit(self: &Arc<Self>, mut request: GenerationRequest) -> Result<Task> {
         let _admission = self.job_gate.lock().await;
+        self.ensure_available()?;
         if self.status().service != "running" {
             bail!("请先启动 API 服务");
         }
