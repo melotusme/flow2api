@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::{
     process::{Child, Command},
@@ -33,7 +33,14 @@ pub fn executable(configured: &str) -> Result<PathBuf> {
         configured.into()
     };
     if !configured.trim().is_empty() {
-        let path = PathBuf::from(configured.trim());
+        let mut path = PathBuf::from(configured.trim());
+        if cfg!(target_os = "macos") && path.extension().is_some_and(|s| s == "app") {
+            let name = match path.file_name().and_then(|s| s.to_str()) {
+                Some("Google Chrome.app") => "Google Chrome",
+                _ => bail!("请选择 Google Chrome.app，或直接选择 Chrome 可执行文件"),
+            };
+            path = path.join("Contents/MacOS").join(name);
+        }
         if !path.is_file() {
             bail!("指定的 Chrome 可执行文件不存在");
         }
@@ -63,6 +70,32 @@ pub fn executable(configured: &str) -> Result<PathBuf> {
         .context("未找到 Google Chrome，请安装 Chrome 或在设置中选择程序路径")
 }
 
+pub fn validate_profile(data_dir: &str, profile_name: &str) -> Result<PathBuf> {
+    let root = Path::new(data_dir);
+    if !root.is_absolute() || !root.is_dir() || !root.join("Local State").is_file() {
+        bail!(
+            "请选择包含 Local State 的浏览器 User Data 根目录，不能选择 Default / Profile 子目录"
+        );
+    }
+    if profile_name.is_empty()
+        || profile_name == "."
+        || profile_name == ".."
+        || profile_name.contains(['/', '\\'])
+        || profile_name.starts_with('-')
+    {
+        bail!("请输入资料子目录名，例如 Default 或 Profile 1");
+    }
+    let root = root.canonicalize()?;
+    let child = root
+        .join(profile_name)
+        .canonicalize()
+        .context("资料子目录不存在，请核对 Default / Profile 名称")?;
+    if child.parent() != Some(root.as_path()) || !child.join("Preferences").is_file() {
+        bail!("资料子目录必须是该 User Data 下含 Preferences 的直接子目录");
+    }
+    Ok(root)
+}
+
 impl BrowserPool {
     pub fn new(root: PathBuf) -> Self {
         Self {
@@ -75,6 +108,8 @@ impl BrowserPool {
         id: &str,
         configured: &str,
         proxy: &str,
+        data_dir: &str,
+        profile_name: &str,
     ) -> Result<Arc<Mutex<Session>>> {
         // IDs are also profile directory names: reject traversal before touching disk.
         uuid::Uuid::parse_str(id).context("账号 ID 无效")?;
@@ -91,8 +126,20 @@ impl BrowserPool {
                 return Ok(session.clone());
             }
         }
-        let mut launched =
-            Session::launch(&executable(configured)?, &self.root.join(id), proxy).await?;
+        let existing = !data_dir.is_empty();
+        let profile = if existing {
+            validate_profile(data_dir, profile_name)?
+        } else {
+            self.root.join(id)
+        };
+        let mut launched = Session::launch_profile(
+            &executable(configured)?,
+            &profile,
+            proxy,
+            profile_name,
+            existing,
+        )
+        .await?;
         launched
             .navigate("https://flow.google.com/projects")
             .await?;
@@ -109,10 +156,28 @@ impl BrowserPool {
 }
 
 impl Session {
+    #[cfg(test)]
     async fn launch(executable: &Path, profile: &Path, proxy: &str) -> Result<Self> {
+        Self::launch_profile(executable, profile, proxy, "", false).await
+    }
+    async fn launch_profile(
+        executable: &Path,
+        profile: &Path,
+        proxy: &str,
+        profile_name: &str,
+        existing: bool,
+    ) -> Result<Self> {
+        if existing && profile.join("SingletonLock").symlink_metadata().is_ok() {
+            bail!(
+                "已有资料目录正被浏览器使用或遗留锁存在，请先正常退出该浏览器；应用不会删除锁文件"
+            );
+        }
         tokio::fs::create_dir_all(profile).await?;
         let active_port = profile.join("DevToolsActivePort");
-        let _ = tokio::fs::remove_file(&active_port).await;
+        if !existing {
+            let _ = tokio::fs::remove_file(&active_port).await;
+        }
+        let launched_at = SystemTime::now();
         let mut command = Command::new(executable);
         command
             .arg(format!("--user-data-dir={}", profile.display()))
@@ -127,6 +192,9 @@ impl Session {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true);
+        if !profile_name.is_empty() {
+            command.arg(format!("--profile-directory={profile_name}"));
+        }
         if !proxy.trim().is_empty() {
             let url = url::Url::parse(proxy)?;
             if !url.username().is_empty() || url.password().is_some() {
@@ -145,6 +213,15 @@ impl Session {
             for _ in 0..100 {
                 if child.try_wait()?.is_some() {
                     bail!("Chrome 已退出，可能该应用的浏览器资料正被另一实例使用");
+                }
+                if existing
+                    && !tokio::fs::metadata(&active_port)
+                        .await
+                        .and_then(|m| m.modified())
+                        .is_ok_and(|t| t >= launched_at)
+                {
+                    sleep(Duration::from_millis(200)).await;
+                    continue;
                 }
                 if let Ok(text) = tokio::fs::read_to_string(&active_port).await {
                     if let Some(port) = text.lines().next().and_then(|v| v.parse::<u16>().ok()) {
@@ -177,7 +254,7 @@ impl Session {
             Ok(Ok(socket)) => socket,
             _ => {
                 let _ = child.kill().await;
-                bail!("无法启动专用 Chrome 会话；请关闭冲突的实例后重试");
+                bail!("无法启动浏览器调试会话；请退出占用该资料目录的浏览器。新版 Chrome 默认日常目录可能禁止调试，请改用独立登录目录");
             }
         };
         let mut session = Self {
@@ -331,6 +408,54 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn existing_profile_validation_rejects_subdirectory_and_traversal() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("Local State"), "{}")?;
+        std::fs::create_dir(dir.path().join("Profile 1"))?;
+        std::fs::write(dir.path().join("Profile 1/Preferences"), "{}")?;
+        assert!(validate_profile(dir.path().to_str().unwrap(), "Profile 1").is_ok());
+        assert!(validate_profile(dir.path().to_str().unwrap(), "../Profile 1").is_err());
+        assert!(validate_profile(dir.path().to_str().unwrap(), "").is_err());
+        assert!(
+            validate_profile(dir.path().join("Profile 1").to_str().unwrap(), "Default").is_err()
+        );
+        Ok(())
+    }
+    #[tokio::test]
+    #[ignore = "launches isolated browser profiles; requires installed Chrome or FLOW2API_TEST_BROWSER"]
+    async fn existing_profile_reopens_without_removing_data_or_taking_over_running_browser(
+    ) -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let executable = executable(&std::env::var("FLOW2API_TEST_BROWSER").unwrap_or_default())?;
+        let profile = directory.path().join("已有资料 with spaces");
+        let mut first = Session::launch(&executable, &profile, "").await?;
+        first
+            .evaluate("localStorage.setItem('unused','test')")
+            .await
+            .ok();
+        first.close().await;
+        std::fs::write(profile.join("preserve.txt"), "preserved")?;
+        validate_profile(profile.to_str().unwrap(), "Default")?;
+        let mut second =
+            Session::launch_profile(&executable, &profile, "", "Default", true).await?;
+        assert!(second.reusable().await);
+        #[cfg(unix)]
+        {
+            assert!(
+                Session::launch_profile(&executable, &profile, "", "Default", true)
+                    .await
+                    .is_err()
+            );
+            assert!(second.reusable().await);
+        }
+        second.close().await;
+        assert_eq!(
+            std::fs::read_to_string(profile.join("preserve.txt"))?,
+            "preserved"
+        );
+        Ok(())
+    }
     #[tokio::test]
     #[ignore = "launches a dedicated local Chrome; requires Google Chrome"]
     async fn browser_transport_detects_closed_page_and_releases_profile() -> Result<()> {
@@ -347,6 +472,8 @@ mod tests {
             project_id: String::new(),
             last_synced: Some(crate::model::now()),
             credits: None,
+            browser_data_dir: String::new(),
+            browser_profile: String::new(),
         };
         app.store.save_account(&account)?;
         app.refresh()?;

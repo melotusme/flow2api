@@ -39,6 +39,10 @@ pub struct Account {
     pub project_id: String,
     pub last_synced: Option<String>,
     pub credits: Option<i64>,
+    #[serde(default)]
+    pub browser_data_dir: String,
+    #[serde(default)]
+    pub browser_profile: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

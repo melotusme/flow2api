@@ -205,7 +205,8 @@ impl App {
         if self.status().busy() || self.status().service == "running" {
             bail!("请先停止 API，再修改运行设置");
         }
-        let old = self.store.settings()?.max_concurrent;
+        let previous = self.store.settings()?;
+        let old = previous.max_concurrent;
         self.store.save_settings(&settings)?;
         if settings.max_concurrent > old {
             self.workers.add_permits(settings.max_concurrent - old);
@@ -213,6 +214,14 @@ impl App {
             self.workers.forget_permits(old - settings.max_concurrent);
         }
         self.browsers.close_all().await;
+        if previous.browser_executable != settings.browser_executable {
+            for mut account in self.store.accounts()? {
+                account.last_synced = None;
+                account.credits = None;
+                self.store.save_account(&account)?;
+            }
+            self.refresh()?;
+        }
         Ok(())
     }
 }

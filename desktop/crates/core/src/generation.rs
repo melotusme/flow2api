@@ -53,11 +53,17 @@ impl App {
         if self.status().busy() {
             bail!("请等待生成任务完成后打开登录窗口");
         }
-        self.store.account(id)?;
+        let account = self.store.account(id)?;
         let settings = self.store.settings()?;
         let session = self
             .browsers
-            .session(id, &settings.browser_executable, &settings.proxy_url)
+            .session(
+                id,
+                &settings.browser_executable,
+                &settings.proxy_url,
+                &account.browser_data_dir,
+                &account.browser_profile,
+            )
             .await?;
         session
             .lock()
@@ -77,7 +83,13 @@ impl App {
         let settings = self.store.settings()?;
         let session = self
             .browsers
-            .session(id, &settings.browser_executable, &settings.proxy_url)
+            .session(
+                id,
+                &settings.browser_executable,
+                &settings.proxy_url,
+                &account.browser_data_dir,
+                &account.browser_profile,
+            )
             .await?;
         let mut session = session.lock().await;
         self.verify_login(&mut session, &mut account).await?;
@@ -202,6 +214,8 @@ impl App {
                 &account.id,
                 &settings.browser_executable,
                 &settings.proxy_url,
+                &account.browser_data_dir,
+                &account.browser_profile,
             )
             .await?;
         let mut session = session.lock().await;
@@ -626,6 +640,8 @@ mod tests {
             project_id: String::new(),
             last_synced: Some(now()),
             credits: None,
+            browser_data_dir: String::new(),
+            browser_profile: String::new(),
         };
         let first = account("first");
         let second = account("second");

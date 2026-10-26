@@ -441,6 +441,8 @@ pub fn import(store: &Store, path: &Path, import_settings: bool) -> Result<Repor
                     },
                     last_synced: None,
                     credits: row["credits"].as_i64(),
+                    browser_data_dir: String::new(),
+                    browser_profile: String::new(),
                 };
                 tx.execute(
                     "INSERT INTO accounts(id,value) VALUES(?1,?2)",
@@ -790,6 +792,8 @@ mod tests {
             project_id: String::new(),
             last_synced: Some(now()),
             credits: Some(800),
+            browser_data_dir: String::new(),
+            browser_profile: String::new(),
         };
         store.save_account(&account)?;
         let key = store.settings()?.api_key;

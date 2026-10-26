@@ -113,6 +113,26 @@ impl Store {
         if account.email.trim().is_empty() || !account.email.contains('@') {
             bail!("请输入 Google 账号邮箱");
         }
+        if account.browser_data_dir.is_empty() && !account.browser_profile.is_empty() {
+            bail!("独立登录模式不能指定已有资料子目录");
+        }
+        if !account.browser_data_dir.is_empty() {
+            let root = Path::new(&account.browser_data_dir)
+                .canonicalize()
+                .unwrap_or_else(|_| PathBuf::from(&account.browser_data_dir));
+            for other in self.accounts()? {
+                if other.id != account.id
+                    && !other.browser_data_dir.is_empty()
+                    && Path::new(&other.browser_data_dir)
+                        .canonicalize()
+                        .ok()
+                        .as_ref()
+                        == Some(&root)
+                {
+                    bail!("该浏览器 User Data 已绑定另一个账号；同一根目录不能并发管理多个账号");
+                }
+            }
+        }
         self.connection.lock().unwrap().execute("INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value", params![account.id, serde_json::to_string(account)?])?;
         Ok(())
     }
@@ -158,6 +178,27 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_accounts_default_to_independent_and_shared_profile_is_rejected() -> Result<()> {
+        let old = serde_json::json!({"id":"one","email":"one@example.test","enabled":true,
+            "project_id":"","last_synced":null,"credits":null});
+        let mut account: Account = serde_json::from_value(old)?;
+        assert!(account.browser_data_dir.is_empty());
+        assert!(account.browser_profile.is_empty());
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(&directory.path().join("store"))?;
+        account.browser_data_dir = directory.path().to_string_lossy().into_owned();
+        account.browser_profile = "Default".into();
+        store.save_account(&account)?;
+        account.id = "two".into();
+        account.email = "two@example.test".into();
+        assert!(store
+            .save_account(&account)
+            .unwrap_err()
+            .to_string()
+            .contains("另一个账号"));
+        Ok(())
+    }
     #[test]
     fn same_data_directory_has_one_owner() -> Result<()> {
         let directory = tempfile::tempdir()?;

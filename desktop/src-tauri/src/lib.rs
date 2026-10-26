@@ -72,6 +72,8 @@ async fn save_account(
             project_id: String::new(),
             last_synced: None,
             credits: None,
+            browser_data_dir: String::new(),
+            browser_profile: String::new(),
         },
     };
     if account.email != email {
@@ -83,6 +85,47 @@ async fn save_account(
     result(&state.core, state.core.store.save_account(&account))?;
     result(&state.core, state.core.refresh())?;
     Ok(account)
+}
+#[tauri::command]
+async fn configure_account_browser(
+    state: tauri::State<'_, Desktop>,
+    id: String,
+    data_dir: String,
+    profile: String,
+) -> Result<(), String> {
+    let _gate = state.core.job_gate.lock().await;
+    if state.core.status().busy() {
+        return Err("请等待任务完成后修改浏览器资料".into());
+    }
+    let mut account = result(&state.core, state.core.store.account(&id))?;
+    if !data_dir.is_empty() {
+        flow2api_core::browser::validate_profile(&data_dir, &profile).map_err(|e| e.to_string())?;
+    }
+    state.core.browsers.close_all().await;
+    account.browser_data_dir = data_dir;
+    account.browser_profile = if account.browser_data_dir.is_empty() {
+        String::new()
+    } else {
+        profile
+    };
+    account.last_synced = None;
+    account.credits = None;
+    result(&state.core, state.core.store.save_account(&account))?;
+    result(&state.core, state.core.refresh())
+}
+#[tauri::command]
+async fn choose_browser(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("选择 Chrome 程序（Mac 可选择 Google Chrome.app）")
+            .blocking_pick_file()
+            .map(|f| f.into_path().map_err(|e| e.to_string()))
+            .transpose()
+            .map(|f| f.map(|p| p.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 async fn delete_account(state: tauri::State<'_, Desktop>, id: String) -> Result<(), String> {
@@ -122,7 +165,7 @@ async fn choose_legacy_directory(app: tauri::AppHandle) -> Result<Option<String>
     tokio::task::spawn_blocking(move || {
         app.dialog()
             .file()
-            .set_title("选择旧版 Flow2API 项目或 data 目录")
+            .set_title("选择资料目录或旧版项目目录")
             .blocking_pick_folder()
             .map(|path| {
                 path.into_path()
@@ -199,6 +242,12 @@ async fn rollback_legacy(state: tauri::State<'_, Desktop>, id: String) -> Result
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
     result(&core, core.refresh())
+}
+#[tauri::command]
+fn open_chrome_download(app: tauri::AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url("https://www.google.com/chrome/", None::<&str>)
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn open_data(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
@@ -451,6 +500,8 @@ pub fn run() {
             accounts,
             save_account,
             delete_account,
+            configure_account_browser,
+            choose_browser,
             open_login,
             sync_account,
             tasks,
@@ -463,6 +514,7 @@ pub fn run() {
             migration_reports,
             legacy_history,
             open_data,
+            open_chrome_download,
             open_media,
             quit
         ])
