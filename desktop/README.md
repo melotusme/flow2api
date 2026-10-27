@@ -97,6 +97,18 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 当前迁移实现已通过合成旧库／WAL／作品夹具与 Mac 原生目录预览验证，尚未对用户实际数据执行导入，也未在 Windows 实测。
 
+### 隔离验证旧数据
+
+可先用临时桌面库验证当前旧数据的导入、作品校验与回滚。该命令只读旧库，不操作正在使用的桌面库，不导入设置、不打开浏览器；临时库和备份随程序退出清理，只输出数量。
+
+从能正常使用官方 Cargo 源的工作目录执行（旧 USTC 镜像环境的处理见交叉构建文档）：
+
+```bash
+rtk proxy cargo run --manifest-path $HOME/Documents/flow2api/desktop/Cargo.toml -p flow2api-core --example migration_preview_audit --locked -- $HOME/Documents/flow2api
+```
+
+2026-10-27 已对本项目旧数据执行通过：账号 1、项目 4、请求日志 6、永久作品 8，隔离导入与撤销后空库校验均通过。此证据不等于已导入日常桌面数据，也不覆盖 Windows 迁移界面。
+
 ## 迁移验收
 
 完整目标仍包括现有图片／视频全部工作流、外部 OpenAI/Gemini 接入、账号刷新、旧数据迁移，以及 Windows/macOS 实机与打包验收。迁移检查表见 `../docs/tauri-migration-progress.md`。模型清单来自旧版基线，不等于所有登记能力已在新版通过验证。
