@@ -1,5 +1,7 @@
 # Flow2API Desktop（Rust + Tauri）
 
+安装后使用步骤见 [桌面版使用说明](../docs/desktop-quickstart.md)。
+
 重写进行中。Python 旧版归档：`archive/python-before-tauri-20261027`。当前桌面代码不启动 Python sidecar。
 
 ## 开发与运行
