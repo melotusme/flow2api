@@ -82,7 +82,7 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 本机已生成未签名的通用开发 ZIP：`../dist/flow2api-macos-universal-debug-20261027.zip`。它包含 arm64 与 x86_64 程序，当前 Apple Silicon Mac 已启动验证；Intel Mac 实机与正式签名尚未验证。开发包不代表完整 Flow 功能验收通过。
 
-本机也已通过 cargo-xwin 交叉编译 Windows x64 程序，并产出 `../dist/Flow2API_0.1.0_x64-setup.exe`。复制到 Windows 后双击安装；安装器按用户安装，缺少 WebView2 时联网补齐。该包未签名，尚未在 Windows 实机安装／运行；交叉编译步骤和待验证项见 `../docs/windows-cross-build.md`。
+本机也已通过 cargo-xwin 交叉编译 Windows x64 程序，并产出 `../dist/Flow2API_0.1.0_x64-setup.exe`。复制到 Windows 后双击安装；安装器按用户安装，缺少 WebView2 时联网补齐。该包未签名；2b9338f 已由 Grok Bot 回报在 Windows 测试机 当前用户升级成功，health/metrics、常用邮箱填入和资料选择预览通过；真实生成与托盘交互待验。交叉编译步骤和待验证项见 `../docs/windows-cross-build.md`。
 
 ## 从 Python 版迁移
 
