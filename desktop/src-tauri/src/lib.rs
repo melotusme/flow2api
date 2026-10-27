@@ -396,10 +396,11 @@ pub fn run() {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
                             let state = app.state::<Desktop>();
-                            let value = if state.core.status().service == "running" {
-                                state.core.stop_service().await
-                            } else {
-                                state.core.start_service().await
+                            let value = match state.core.status().service.as_str() {
+                                "running" => state.core.stop_service().await,
+                                "stopped" | "failed" => state.core.start_service().await,
+                                // An old menu click can arrive after a transition began.
+                                _ => return,
                             };
                             if let Err(error) = value {
                                 let _ = app.emit("notice", error.to_string());
@@ -445,12 +446,16 @@ pub fn run() {
                             .take(90)
                             .collect::<String>()
                     ));
-                    let _ = toggle.set_text(if status.service == "running" {
-                        "停止 API 服务"
-                    } else {
-                        "启动 API 服务"
+                    let _ = toggle.set_text(match status.service.as_str() {
+                        "running" => "停止 API 服务",
+                        "starting" => "API 正在启动…",
+                        "stopping" => "API 正在停止…",
+                        _ => "启动 API 服务",
                     });
-                    let _ = toggle.set_enabled(!status.busy());
+                    let _ = toggle.set_enabled(
+                        !status.busy()
+                            && matches!(status.service.as_str(), "running" | "stopped" | "failed"),
+                    );
                     let _ = tray.set_tooltip(Some(status.tray_summary()));
                     let _ = tray.set_icon(Some(icon(&status)));
                     if let Some(window) = app_handle.get_webview_window("main") {
