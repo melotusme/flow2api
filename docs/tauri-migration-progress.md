@@ -89,3 +89,5 @@
 - 核心 30 项测试通过，5 项环境测试默认忽略；新增测试验证名称与邮箱发现、缺失目录及越界项过滤、损坏索引容错。JS 语法检查及 Mac 双架构、Windows release/NSIS 构建通过。
 - M3 已更新正式安装 app，旧应用保存在 ~/Applications/Flow2API-before-profile-picker.app。原生界面验证邮箱点选填入、资料选择弹窗真实列出本机资料并优先匹配当前邮箱；只预览后取消，未绑定资料。health healthy。
 - Windows 新安装器 SHA256 029b5019587a40eac67272df381924c6b50ec1e8d0d7584818541de9e4f81627 已通过 Windows 测试机 会话送达，等待本次升级验收；旧版 Windows 安装证据不能代替此新增能力验证。
+
+- Windows 测试机 最终回报（2026-10-27 08:32 北京时间）：Windows 新包 5,321,584 字节、SHA256 匹配，当前用户安装退出码 0，数据保留；正式安装路径进程 PID 47216，8000 health/metrics 200。三个邮箱快捷填入通过，已有登录资料弹窗预览并取消，未绑定或登录；截图位于 Windows 测试机 桌面 Flow2API-2b9338f-win-01…05。此为 Bot 回报。
