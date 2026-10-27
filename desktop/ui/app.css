@@ -3,3 +3,7 @@
 .migration-report{border-top:1px solid var(--line,#304347);padding:16px 0;overflow-wrap:anywhere}.migration-report p{margin:8px 0}.migration-report .hint{font-size:12px}#legacy-settings{width:auto;margin-right:8px}#legacy-history{max-height:420px;overflow:auto}#legacy-preview .hint{font-size:12px}#legacy-path{overflow-wrap:anywhere}
 
 .settings-layout{align-items:start}.migration-checkbox{display:flex;flex-direction:row;align-items:center;gap:8px}
+
+.preferred-accounts{margin:12px 0 24px}.preferred-accounts .actions{margin-top:8px;flex-wrap:wrap}
+.profile-dialog{width:min(600px,90vw);max-height:85vh;overflow:auto;border:1px solid #d9dfe5;border-radius:16px;padding:24px;color:#202830;background:#fff;box-shadow:0 20px 80px #0003}
+.profile-dialog::backdrop{background:#10182866}.profile-options{display:grid;gap:10px;margin:20px 0}.profile-options button{display:grid;gap:5px;text-align:left;white-space:normal;overflow-wrap:anywhere;padding:14px}.profile-options small{color:#64748b}.profile-dialog .actions{display:flex;gap:10px;flex-wrap:wrap}

@@ -70,6 +70,61 @@ pub fn executable(configured: &str) -> Result<PathBuf> {
         .context("未找到 Google Chrome，请安装 Chrome 或在设置中选择程序路径")
 }
 
+#[derive(serde::Serialize)]
+pub struct BrowserProfile {
+    pub data_dir: String,
+    pub profile: String,
+    pub name: String,
+    pub email: String,
+}
+
+/// Only read Chrome's profile index and check directory structure; never read cookies.
+pub fn discover_profiles() -> Vec<BrowserProfile> {
+    let mut roots = Vec::new();
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        roots.push(PathBuf::from(home).join("Library/Application Support/Google/Chrome"));
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        roots.push(PathBuf::from(local).join("Google/Chrome/User Data"));
+    }
+    roots
+        .into_iter()
+        .flat_map(|root| profiles_in(&root))
+        .collect()
+}
+
+fn profiles_in(root: &Path) -> Vec<BrowserProfile> {
+    let index = std::fs::read(root.join("Local State"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let Some(cache) = index
+        .as_ref()
+        .and_then(|v| v["profile"]["info_cache"].as_object())
+    else {
+        return Vec::new();
+    };
+    let mut profiles = Vec::new();
+    for (profile, info) in cache {
+        let Ok(root) = validate_profile(&root.to_string_lossy(), profile) else {
+            continue;
+        };
+        profiles.push(BrowserProfile {
+            data_dir: root.to_string_lossy().into_owned(),
+            profile: profile.clone(),
+            name: info["name"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(profile)
+                .into(),
+            email: info["user_name"].as_str().unwrap_or_default().into(),
+        });
+    }
+    profiles.sort_by(|a, b| a.name.cmp(&b.name).then(a.profile.cmp(&b.profile)));
+    profiles
+}
+
 pub fn validate_profile(data_dir: &str, profile_name: &str) -> Result<PathBuf> {
     let root = Path::new(data_dir);
     if !root.is_absolute() || !root.is_dir() || !root.join("Local State").is_file() {
@@ -408,6 +463,30 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn profile_discovery_lists_named_profiles_and_skips_invalid_entries() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::create_dir(dir.path().join("Profile 1"))?;
+        std::fs::write(dir.path().join("Profile 1/Preferences"), "{}")?;
+        std::fs::write(
+            dir.path().join("Local State"),
+            serde_json::to_vec(&json!({
+                "profile": {"info_cache": {
+                    "Profile 1": {"name":"Work", "user_name":"user@example.test"},
+                    "Missing": {"name":"Deleted"},
+                    "../escape": {"name":"Invalid"}
+                }}
+            }))?,
+        )?;
+        let profiles = profiles_in(dir.path());
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].name, "Work");
+        assert_eq!(profiles[0].email, "user@example.test");
+        assert_eq!(profiles[0].profile, "Profile 1");
+        std::fs::write(dir.path().join("Local State"), "invalid")?;
+        assert!(profiles_in(dir.path()).is_empty());
+        Ok(())
+    }
     #[test]
     fn existing_profile_validation_rejects_subdirectory_and_traversal() -> Result<()> {
         let dir = tempfile::tempdir()?;

@@ -114,6 +114,12 @@ async fn configure_account_browser(
     result(&state.core, state.core.refresh())
 }
 #[tauri::command]
+async fn browser_profiles() -> Result<Vec<flow2api_core::browser::BrowserProfile>, String> {
+    tokio::task::spawn_blocking(flow2api_core::browser::discover_profiles)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 async fn choose_browser(app: tauri::AppHandle) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
         app.dialog()
@@ -501,6 +507,7 @@ pub fn run() {
             save_account,
             delete_account,
             configure_account_browser,
+            browser_profiles,
             choose_browser,
             open_login,
             sync_account,
