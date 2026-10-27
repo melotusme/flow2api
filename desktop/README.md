@@ -30,6 +30,8 @@ rtk proxy curl -fsS http://127.0.0.1:8000/health
 
 ## 接入兼容性进度
 
+旧版 75 个路由、桌面替代入口和未兼容项见 [接口兼容核对](../docs/desktop-api-compatibility.md)。旧 Web 管理／插件 HTTP 不随桌面功能自动兼容。
+
 OpenAI/Gemini 简写模型支持显式比例、分辨率参数，以及首张参考图的 EXIF 方向和最近比例推断。自动推断后复用已下载字节，避免临时图片 URL 二次读取；参考图限制 20 MB。视频以任务 ID 匹配批量状态，分别保存每个返回结果，并在放大前核对媒体 ID。
 
 多轮请求保留旧版语义：OpenAI 只读取最后消息，图片编辑补入最近可下载的 assistant 图片；Gemini 读取最后 user 内容，并去除工具调用脚手架。OpenAI 还支持顶层 `image` 和 Gemini `contents` 请求格式。模型发现支持 `/v1/models/aliases`、`/models/{model}` 与 `/v1beta/models/{model}`；Gemini 错误返回 `code`、`message` 和 `status`。
@@ -84,7 +86,7 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 本机已生成未签名的通用开发 ZIP：`../dist/flow2api-macos-universal-debug-20261027.zip`。它包含 arm64 与 x86_64 程序，当前 Apple Silicon Mac 已启动验证；Intel Mac 实机与正式签名尚未验证。开发包不代表完整 Flow 功能验收通过。
 
-本机也已通过 cargo-xwin 交叉编译 Windows x64 程序，并产出 `../dist/Flow2API_0.1.0_x64-setup.exe`。复制到 Windows 后双击安装；安装器按用户安装，缺少 WebView2 时联网补齐。该包未签名；2b9338f 已由 Grok Bot 回报在 Windows 测试机 当前用户升级成功，health/metrics、常用邮箱填入和资料选择预览通过；真实生成与托盘交互待验。交叉编译步骤和待验证项见 `../docs/windows-cross-build.md`。
+本机也已通过 cargo-xwin 交叉编译 Windows x64 程序，并产出 `../dist/Flow2API_0.1.0_x64-setup.exe`。复制到 Windows 后双击安装；安装器按用户安装，缺少 WebView2 时联网补齐。该包未签名；2b9338f 已由 Grok Bot 回报在 Windows 测试机 当前用户升级成功，health/metrics、常用邮箱填入、资料选择预览及空闲时托盘停启通过。69652ff 新包已送达，等待升级验收；真实生成及活动任务状态尚未验收。交叉编译步骤和待验证项见 `../docs/windows-cross-build.md`。
 
 ## 从 Python 版迁移
 

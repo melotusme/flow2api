@@ -41,7 +41,7 @@
 | 模型/外部接入 | resolver/request/API 测试覆盖简写、参数、参考图比例、OpenAI/Gemini 和历史图片 | 外部客户端经真实生成验证 |
 | 账号/浏览器 | 独立资料恢复、失效可用数取消、账号分配测试；M3 资料列表与邮箱快捷入口直接验证；Windows Windows 测试机 回报通过 | 用户完成 Google 登录后，验证同步、长期会话刷新和真实生成期间恢复 |
 | 旧数据迁移 | 合成 WAL 测试；本项目实际旧数据隔离导入/回滚通过；Mac 原生预览 | 用户实际旧数据导入与回滚；Windows 迁移/中文路径 |
-| 管理/插件/监控 | 本地 Tauri 账号与设置管理替代旧 Web 管理；无需 Cookie 插件；health/metrics 已在双端响应 | 明确旧管理/插件 HTTP 接口兼容清单；原有全部监控指标未复刻 |
+| 管理/插件/监控 | 本地 Tauri 账号与设置管理替代旧 Web 管理；无需 Cookie 插件；health/metrics 已在双端响应；75 个旧路由逐项清单见 desktop-api-compatibility.md | 旧管理/插件 HTTP 未实现；原有全部监控指标未复刻，详见兼容清单 |
 | 安装与发行 | 两端安装运行、升级保留数据；旧 Python commit/tag/ZIP 已归档 | Windows/macOS 签名、公证及正式发行说明 |
 
 ## 验证记录
