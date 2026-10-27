@@ -81,3 +81,11 @@
 - 同一会话回报：主力 Mac 归档哈希匹配，安装至 ~/Applications/Flow2API.app；health/metrics 200，关窗保活、单实例及退出释放通过。未修改安全策略；未签名，spctl 拒绝评估，但 open 成功且未见拦截对话框。菜单栏交互及无账号时的账号卡片按钮未覆盖。
 - Codex 本机独立核对：Mac 安装程序与构建产物一致，正式安装路径进程 PID 63588 运行，8000 health healthy。两端保持运行；真实 Google 登录和图片／视频生成仍待验，代理未绑定日常浏览器资料。
 - 当前登录自动查找 Chrome，不读取系统默认浏览器；可指定 Chrome 程序并选择独立资料或已有资料。EgoLite 及任意系统默认浏览器尚不支持。
+
+## 资料选择与常用账号（2026-10-27，2b9338f）
+
+- 新增本机 Chrome 资料发现：macOS 扫描当前用户 Library/Application Support/Google/Chrome，Windows 扫描 LOCALAPPDATA/Google/Chrome/User Data。仅读取 Local State 的 info_cache 并验证资料目录边界，不读取 Cookie。显示资料名称、邮箱、子目录，当前账号邮箱匹配项优先；手动目录入口降为备用。
+- 账号添加保留手动输入，并提供用户指定的三个常用邮箱按钮；点选只填入输入框，不自动登记或登录。
+- 核心 30 项测试通过，5 项环境测试默认忽略；新增测试验证名称与邮箱发现、缺失目录及越界项过滤、损坏索引容错。JS 语法检查及 Mac 双架构、Windows release/NSIS 构建通过。
+- M3 已更新正式安装 app，旧应用保存在 ~/Applications/Flow2API-before-profile-picker.app。原生界面验证邮箱点选填入、资料选择弹窗真实列出本机资料并优先匹配当前邮箱；只预览后取消，未绑定资料。health healthy。
+- Windows 新安装器 SHA256 029b5019587a40eac67272df381924c6b50ec1e8d0d7584818541de9e4f81627 已通过 Windows 测试机 会话送达，等待本次升级验收；旧版 Windows 安装证据不能代替此新增能力验证。
