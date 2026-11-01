@@ -86,7 +86,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
-        run: cargo install tauri-cli --version 2.10.1 --locked && cargo tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+        run: npx --yes @tauri-apps/cli@2.10.1 build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
       - run: node scripts/prepare-release.mjs ${{ matrix.prepare }} ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:

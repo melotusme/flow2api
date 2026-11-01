@@ -764,7 +764,7 @@ class CallLogicConfigRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     username: Optional[str] = None
     old_password: str
-    new_password: str
+    new_password: Optional[str] = None
 
 
 class UpdateAPIKeyRequest(BaseModel):
@@ -938,20 +938,28 @@ async def change_password(
     if not AuthManager.verify_admin(admin_config.username, request.old_password):
         raise HTTPException(status_code=400, detail="旧密码错误")
 
-    # Update password and username in database
-    update_params = {"password": request.new_password}
-    if request.username:
-        update_params["username"] = request.username
+    update_params = {}
+    new_password = (request.new_password or "").strip()
+    if new_password:
+        if len(new_password) < 4:
+            raise HTTPException(status_code=400, detail="新密码至少 4 个字符")
+        update_params["password"] = new_password
+    if request.username and request.username.strip():
+        update_params["username"] = request.username.strip()
+    if not update_params:
+        raise HTTPException(status_code=400, detail="没有要修改的内容")
 
     await db.update_admin_config(**update_params)
 
     # 🔥 Hot reload: sync database config to memory
     await db.reload_config_to_memory()
 
-    # 🔑 Invalidate all admin session tokens (force re-login for security)
-    active_admin_tokens.clear()
+    if "password" in update_params:
+        # 🔑 Invalidate all admin session tokens (force re-login for security)
+        active_admin_tokens.clear()
+        return {"success": True, "message": "密码修改成功，请重新登录", "relogin": True}
 
-    return {"success": True, "message": "密码修改成功,请重新登录"}
+    return {"success": True, "message": "用户名已修改", "relogin": False}
 
 
 # ========== Token Management ==========
@@ -1706,7 +1714,7 @@ async def get_stats(token: str = Depends(verify_admin_token)):
 @router.get("/api/logs")
 async def get_logs(limit: int = 100, token: str = Depends(verify_admin_token)):
     """Get lightweight request logs for list view"""
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, 500))
     logs = await db.get_logs(limit=limit, include_payload=False)
 
     result = []

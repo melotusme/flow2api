@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - Flow2API</title>
+    <title>管理员登录 - Flow2API</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes slide-up{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
@@ -18,21 +18,22 @@
     <div class="flex min-h-full flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
         <div class="sm:mx-auto sm:w-full sm:max-w-md">
             <div class="text-center">
-                <h1 class="text-4xl font-bold">Flow2API</h1>
-                <p class="mt-2 text-sm text-muted-foreground">登录你的创作与管理工作区</p>
+                <h1 class="text-4xl font-bold">管理员登录</h1>
+                <p class="mt-2 text-sm text-muted-foreground">这是本机管理账号，不是 Google 邮箱。</p>
             </div>
         </div>
 
         <div class="sm:mx-auto sm:w-full sm:max-w-md">
             <div class="login-card">
                 <form id="loginForm" class="space-y-6">
+                    <p id="loginError" class="login-error notice error" role="alert" hidden></p>
                     <div class="space-y-2">
-                        <label for="username" class="text-sm font-medium">账户</label>
-                        <input type="text" id="username" name="username" autocomplete="username" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" placeholder="请输入账户">
+                        <label for="username" class="text-sm font-medium">管理员用户名</label>
+                        <input type="text" id="username" name="username" autocomplete="username" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
                     </div>
                     <div class="space-y-2">
-                        <label for="password" class="text-sm font-medium">密码</label>
-                        <input type="password" id="password" name="password" autocomplete="current-password" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" placeholder="请输入密码">
+                        <label for="password" class="text-sm font-medium">管理员密码</label>
+                        <input type="password" id="password" name="password" autocomplete="current-password" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
                     </div>
                     <button type="submit" id="loginButton" class="inline-flex items-center justify-center rounded-md font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-10 w-full disabled:opacity-50">登录</button>
                 </form>
@@ -45,10 +46,11 @@
     </div>
 
     <script>
-        const form=document.getElementById('loginForm'),btn=document.getElementById('loginButton');
-        form.addEventListener('submit',async(e)=>{e.preventDefault();btn.disabled=true;btn.textContent='登录中...';try{const fd=new FormData(form),r=await fetch('/api/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:fd.get('username'),password:fd.get('password')})});const d=await r.json();if(d.success){location.href='/manage'}else showToast(d.message||'登录失败','error')}catch(e){showToast('网络错误,请稍后重试','error')}finally{btn.disabled=false;btn.textContent='登录'}});
-        function showToast(m,t='error'){const d=document.createElement('div'),bc={success:'bg-green-600',error:'bg-destructive',info:'bg-primary'};d.className=`fixed bottom-4 right-4 ${bc[t]||bc.error} text-white px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium z-50 animate-slide-up`;d.textContent=m;document.body.appendChild(d);setTimeout(()=>{d.style.opacity='0';d.style.transition='opacity .3s';setTimeout(()=>d.parentNode&&document.body.removeChild(d),300)},2000)}
-        window.addEventListener('DOMContentLoaded',()=>{fetch('/api/stats',{credentials:'include'}).then(r=>{if(r.ok)location.href='/manage'}).catch(()=>{})});
+        const form=document.getElementById('loginForm'),btn=document.getElementById('loginButton'),loginError=document.getElementById('loginError');
+        const showError=message=>{loginError.hidden=!message;loginError.textContent=message||''};
+        form.addEventListener('input',()=>showError(''));
+        form.addEventListener('submit',async(e)=>{e.preventDefault();showError('');btn.disabled=true;btn.textContent='登录中...';try{const fd=new FormData(form),r=await fetch('/api/login',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:fd.get('username'),password:fd.get('password')})});const d=await r.json();if(d.success){location.href='/test'}else showError(d.message||'用户名或密码不正确')}catch(e){showError('网络错误，请稍后再试')}finally{btn.disabled=false;btn.textContent='登录'}});
+        window.addEventListener('DOMContentLoaded',()=>{fetch('/api/stats',{credentials:'include'}).then(r=>{if(r.ok)location.href='/test'}).catch(()=>{})});
     </script>
 </body>
 </html>

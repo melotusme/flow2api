@@ -1409,7 +1409,8 @@ class GenerationHandler:
 
     async def _archive_output(self, source, kind, response_state):
         archive = MediaArchive()
-        filename = await archive.save(source, kind, self.file_cache)
+        meta = (response_state or {}).get("archive")
+        filename = await archive.save(source, kind, self.file_cache, meta)
         return f"{self._get_base_url(response_state)}/media/{filename}"
 
     def _create_generation_result(self) -> Dict[str, Any]:
@@ -1616,6 +1617,11 @@ class GenerationHandler:
             return
 
         model_config = MODEL_CONFIG[model]
+        response_state["archive"] = {
+            "prompt": prompt,
+            "model": model,
+            "model_name": str(model_config.get("display_name") or model),
+        }
         generation_type = model_config["type"]
         video_type_for_op = model_config.get("video_type", "")
         request_operation = (

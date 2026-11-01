@@ -16,7 +16,7 @@ class MediaArchive:
         self.directory = Path(directory or Path(__file__).resolve().parents[2] / 'data' / 'generated')
         self.directory.mkdir(parents=True, exist_ok=True)
 
-    def save_bytes(self, content, kind):
+    def save_bytes(self, content, kind, meta=None):
         if kind == 'image':
             if content.startswith(b'\xff\xd8\xff'): ext, mime = 'jpg', 'image/jpeg'
             elif content.startswith(b'\x89PNG\r\n\x1a\n'): ext, mime = 'png', 'image/png'
@@ -35,12 +35,50 @@ class MediaArchive:
         record = {'filename': filename, 'type': kind, 'mime_type': mime,
                   'size': len(content), 'created_at': datetime.now(timezone.utc).isoformat(),
                   'url': f'/media/{filename}'}
+        record.update(self._public_meta(meta))
         if not target.exists():
             self._atomic_write(target, content)
         metadata = target.with_suffix('.json')
-        if not metadata.exists():
+        if metadata.exists():
+            self._fill_missing_meta(metadata, record)
+        else:
             self._atomic_write(metadata, json.dumps(record, ensure_ascii=False).encode())
         return filename
+
+    @staticmethod
+    def _public_meta(meta):
+        if not isinstance(meta, dict):
+            return {}
+        result = {}
+        prompt = str(meta.get('prompt') or '').strip()
+        model = str(meta.get('model') or '').strip()
+        model_name = str(meta.get('model_name') or '').strip()
+        if prompt:
+            result['prompt'] = prompt[:2000]
+        if model:
+            result['model'] = model[:200]
+        if model_name:
+            result['model_name'] = model_name[:200]
+        return result
+
+    def _fill_missing_meta(self, metadata, record):
+        try:
+            current = json.loads(metadata.read_text())
+        except (OSError, ValueError):
+            current = {}
+        if not isinstance(current, dict):
+            current = {}
+        changed = False
+        for key in ('prompt', 'model', 'model_name'):
+            if record.get(key) and not current.get(key):
+                current[key] = record[key]
+                changed = True
+        for key in ('filename', 'type', 'mime_type', 'size', 'url', 'created_at'):
+            if key not in current and record.get(key) is not None:
+                current[key] = record[key]
+                changed = True
+        if changed:
+            self._atomic_write(metadata, json.dumps(current, ensure_ascii=False).encode())
 
     @staticmethod
     def _atomic_write(path, content):
@@ -54,7 +92,7 @@ class MediaArchive:
         finally:
             temp.unlink(missing_ok=True)
 
-    async def save(self, source, kind, cache):
+    async def save(self, source, kind, cache, meta=None):
         if source.startswith('data:'):
             content = base64.b64decode(source.split(',', 1)[1], validate=True)
         elif not source.startswith(('http://', 'https://')):
@@ -67,7 +105,7 @@ class MediaArchive:
             else:
                 filename = await cache.download_and_cache(source, kind)
                 content = await asyncio.to_thread(cache.get_cache_path(filename).read_bytes)
-        return await asyncio.to_thread(self.save_bytes, content, kind)
+        return await asyncio.to_thread(self.save_bytes, content, kind, meta)
 
     def resolve(self, filename):
         if not re.fullmatch(r'[0-9a-f]{64}\.(jpg|png|webp|gif|mp4|webm)', filename):

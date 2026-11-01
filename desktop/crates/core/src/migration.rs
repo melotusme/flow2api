@@ -557,7 +557,19 @@ pub fn import(store: &Store, path: &Path, import_settings: bool) -> Result<Repor
                     .unwrap_or(&report.created_at)
                     .into(),
                 task_id: format!("legacy:{}", report.id),
-                media_id: String::new(),
+                media_id: record["media_id"].as_str().unwrap_or_default().into(),
+                prompt: record["prompt"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(2000)
+                    .collect(),
+                model: record["model"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect(),
             };
             let metadata = target.with_extension("json");
             if !metadata.exists() {
@@ -643,7 +655,9 @@ pub fn history(store: &Store, table: &str) -> Result<Vec<Value>> {
         bail!("未知历史类型");
     }
     let db = store.connection.lock().unwrap();
-    let mut stmt=db.prepare("SELECT value FROM legacy_records WHERE json_extract(value,'$.table')=?1 ORDER BY rowid DESC LIMIT 200")?;
+    let mut stmt = db.prepare(
+        "SELECT value FROM legacy_records WHERE json_extract(value,'$.table')=?1 ORDER BY rowid DESC",
+    )?;
     let values = stmt
         .query_map([table], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;

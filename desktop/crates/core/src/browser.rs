@@ -202,6 +202,14 @@ impl BrowserPool {
         sessions.insert(id.into(), session.clone());
         Ok(session)
     }
+    pub async fn existing_session(&self, id: &str) -> Option<Arc<Mutex<Session>>> {
+        let existing = self.sessions.lock().await.get(id).cloned()?;
+        if existing.lock().await.reusable().await {
+            Some(existing)
+        } else {
+            None
+        }
+    }
     pub async fn close_all(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock().await);
         for session in sessions.into_values() {

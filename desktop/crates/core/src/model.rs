@@ -85,6 +85,10 @@ pub struct Media {
     pub created_at: String,
     pub task_id: String,
     pub media_id: String,
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default)]
+    pub model: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

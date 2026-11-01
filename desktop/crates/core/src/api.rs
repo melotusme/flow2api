@@ -554,6 +554,22 @@ mod tests {
                 .len()
                 > 30
         );
+        // Saving settings while idle and running automatically restarts on the new port.
+        let next_port = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let mut updated = app.store.settings()?;
+        updated.port = next_port.local_addr()?.port();
+        drop(next_port);
+        app.save_settings(updated.clone()).await?;
+        let address = app.status().address.unwrap();
+        assert!(address.ends_with(&updated.port.to_string()));
+        assert_eq!(
+            client
+                .get(format!("{address}/health"))
+                .send()
+                .await?
+                .status(),
+            200
+        );
         // Ordinary API stop is reversible; application shutdown is terminal.
         app.stop_service().await?;
         app.start_service().await?;

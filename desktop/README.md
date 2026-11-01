@@ -23,8 +23,8 @@ rtk proxy cargo tauri dev
 ```bash
 # 不启动界面的纯 Rust 服务（独立测试数据目录，避免和桌面版同时打开同一数据库）
 rtk proxy cargo run --manifest-path desktop/Cargo.toml -p flow2api-core --bin flow2api-server -- /tmp/flow2api-native-check
-# 验证本机监听
-rtk proxy curl -fsS http://127.0.0.1:8000/health
+# 验证本机监听与接口契约（可加 --key <API_KEY> --stage image|video）
+rtk proxy node desktop/scripts/verify-e2e.mjs
 # 纯服务模式停止：在启动终端按 Ctrl+C；存在生成任务时需等待其完成
 ```
 
@@ -137,7 +137,7 @@ if ($p.ExitCode -ne 0) { throw "安装失败：$($p.ExitCode)" }
 ## 从 Python 版迁移
 
 1. 停止旧版服务，在桌面版“设置与接入 → 从 Python 旧版迁移”选择项目目录或 `data` 目录。
-2. 核对账号／项目／任务／日志／永久作品数。点击停止桌面 API，再点击“备份并导入”。可选导入端口、API Key、代理与图片／视频超时。
+2. 核对账号／项目／任务／日志／永久作品数，直接点击“备份并导入”（无执行中任务时，桌面端会自动平滑重启 API）。可选导入端口、API Key、代理与图片／视频超时。
 3. 账号按邮箱去重，已存在的桌面账号保持原样；新账号保留当前项目和额度记录，但必须打开专用 Chrome 登录并同步后使用。旧版 Cookie／密码与 Chrome profile 不直接迁入新会话。
 4. `data/generated` 的永久作品验证格式和 SHA256 后复制，临时缓存不导入。旧任务不重新提交；已完成记录显示“旧版已完成”，未完成记录显示“已中断”。项目、请求日志摘要和累计统计可在迁移面板查看最近 200 条。
 5. 导入记录显示备份目录。其中 `desktop-before.db` 是桌面版导入前快照，`python-source.db` 是包含 WAL 数据的完整旧库快照，另保留旧配置及报告。备份可能包含旧凭据，不要分享该目录。

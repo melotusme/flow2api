@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理控制台 - Flow2API</title>
+    <title>Google 账号 - Flow2API</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes slide-up{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
@@ -19,41 +19,38 @@
 <body class="h-full bg-background text-foreground antialiased">
     <script src="/assets/shell.js"></script>
     <main class="mx-auto max-w-7xl px-6 py-6">
-        <div class="page-intro"><div><div class="eyebrow">MANAGE YOUR WORKSPACE</div><h1>管理控制台</h1><p>管理账号、连接配置与请求记录。</p></div><button onclick="logout()" class="btn">退出登录</button></div>
+        <div class="page-intro"><div><h1 id="manageTitle">Google 账号</h1><p id="manageSubtitle">查看哪些账号可以生成，以及今日用量。</p></div></div>
         <!-- Token 管理面板 -->
         <div id="panelTokens">
             <!-- 统计卡片 -->
-            <div class="grid gap-4 grid-cols-2 md:grid-cols-5 mb-6">
+            <div class="grid gap-4 grid-cols-2 md:grid-cols-4 mb-6">
                 <div class="rounded-lg border border-border bg-background p-4">
-                    <p class="text-sm font-medium text-muted-foreground mb-2">Token 总数</p>
+                    <p class="text-sm font-medium text-muted-foreground mb-2">账号数</p>
                     <h3 class="text-xl font-bold" id="statTotal">-</h3>
                 </div>
                 <div class="rounded-lg border border-border bg-background p-4">
-                    <p class="text-sm font-medium text-muted-foreground mb-2">活跃 Token</p>
+                    <p class="text-sm font-medium text-muted-foreground mb-2">可用</p>
                     <h3 class="text-xl font-bold text-green-600" id="statActive">-</h3>
                 </div>
                 <div class="rounded-lg border border-border bg-background p-4">
-                    <p class="text-sm font-medium text-muted-foreground mb-2">今日图片/总图片</p>
+                    <p class="text-sm font-medium text-muted-foreground mb-2">今日图片</p>
                     <h3 class="text-xl font-bold text-blue-600" id="statImages">-</h3>
+                    <p class="text-xs text-muted-foreground mt-1">累计 <span id="statImagesTotal">-</span></p>
                 </div>
                 <div class="rounded-lg border border-border bg-background p-4">
-                    <p class="text-sm font-medium text-muted-foreground mb-2">今日视频/总视频</p>
+                    <p class="text-sm font-medium text-muted-foreground mb-2">今日视频</p>
                     <h3 class="text-xl font-bold text-purple-600" id="statVideos">-</h3>
-                </div>
-                <div class="rounded-lg border border-border bg-background p-4">
-                    <p class="text-sm font-medium text-muted-foreground mb-2">今日错误/总错误</p>
-                    <h3 class="text-xl font-bold text-destructive" id="statErrors">-</h3>
+                    <p class="text-xs text-muted-foreground mt-1">累计 <span id="statVideosTotal">-</span></p>
                 </div>
             </div>
 
             <!-- Token 列表 -->
             <div class="rounded-lg border border-border bg-background">
                 <div class="flex items-center justify-between gap-4 p-4 border-b border-border">
-                    <h3 class="text-lg font-semibold">Token 列表</h3>
-                    <div class="flex items-center gap-3">
-                        <!-- 登录态自动校验开关 -->
+                    <h3 class="text-lg font-semibold">账号</h3>
+                    <div class="flex flex-wrap items-center justify-end gap-2">
                         <div class="flex items-center gap-2">
-                            <span class="text-xs text-muted-foreground">自动校验登录态</span>
+                            <span class="text-xs text-muted-foreground">定时检查 Google 是否仍登录</span>
                             <div class="relative inline-flex items-center group">
                                 <label class="inline-flex items-center cursor-pointer">
                                     <input type="checkbox" id="atAutoRefreshToggle" onchange="toggleATAutoRefresh()" class="sr-only peer">
@@ -66,52 +63,47 @@
                                 </div>
                             </div>
                         </div>
-                        <button onclick="refreshTokens()" class="inline-flex items-center justify-center rounded-md transition-colors hover:bg-accent h-8 w-8" title="刷新">
-                            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                            </svg>
-                        </button>
-                        <button onclick="exportTokens()" class="inline-flex items-center justify-center rounded-md bg-blue-600 text-white hover:bg-blue-700 h-8 px-3" title="导出所有账号">
+                        <button onclick="refreshTokens()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-8 px-3 text-sm" type="button">刷新</button>
+                        <button onclick="exportTokens()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-8 px-3 text-sm" title="导出所有账号" type="button">
                             <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                 <polyline points="7 10 12 15 17 10"/>
                                 <line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                            <span class="text-sm font-medium">导出</span>
+                            <span class="text-sm font-medium">导出账号</span>
                         </button>
-                        <button onclick="openImportModal()" class="inline-flex items-center justify-center rounded-md bg-green-600 text-white hover:bg-green-700 h-8 px-3" title="导入账号">
+                        <button onclick="openImportModal()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-8 px-3 text-sm" title="导入账号" type="button">
                             <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                 <polyline points="17 8 12 3 7 8"/>
                                 <line x1="12" y1="3" x2="12" y2="15"/>
                             </svg>
-                            <span class="text-sm font-medium">导入</span>
+                            <span class="text-sm font-medium">导入账号</span>
                         </button>
-                        <button onclick="openAddModal()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3">
+                        <button onclick="openAddModal()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3" type="button">
                             <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="12" y1="5" x2="12" y2="19"/>
                                 <line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
-                            <span class="text-sm font-medium">新增</span>
+                            <span class="text-sm font-medium">添加账号</span>
                         </button>
                     </div>
                 </div>
                 
+                <div class="list-toolbar px-4 pt-4">
+                    <input id="accountSearch" type="search" aria-label="搜索账号" placeholder="搜索账号">
+                    <select id="accountStatus" aria-label="账号状态"><option value="all">全部状态</option><option value="active">可用</option><option value="inactive">已停用</option></select>
+                </div>
+                <p id="accountEmpty" class="muted px-4" hidden>没有匹配的账号。</p>
                 <div class="relative w-full overflow-x-auto overflow-y-visible">
                     <table class="w-full table-auto text-sm">
                         <thead>
                             <tr class="border-b border-border">
-                                <th class="h-10 px-2.5 text-left align-middle font-medium text-muted-foreground">邮箱</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">状态</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">协议</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">过期时间</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">余额</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">类型</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">项目ID</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">图片</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">视频</th>
-                                <th class="h-10 px-2.5 text-center align-middle font-medium text-muted-foreground">错误</th>
-                                <th class="h-10 w-[184px] px-2.5 text-right align-middle font-medium text-muted-foreground">操作</th>
+                                <th class="h-10 px-2.5 text-left align-middle font-medium text-muted-foreground"><button type="button" class="sort-button" id="sortAccount">账号</button></th>
+                                <th class="h-10 px-2.5 text-left align-middle font-medium text-muted-foreground">是否可用</th>
+                                <th class="h-10 px-2.5 text-right align-middle font-medium text-muted-foreground"><button type="button" class="sort-button" id="sortCredits">余额</button></th>
+                                <th class="h-10 px-2.5 text-right align-middle font-medium text-muted-foreground"><button type="button" class="sort-button" id="sortToday">今日图片/视频</button></th>
+                                <th class="h-10 px-2.5 text-right align-middle font-medium text-muted-foreground">操作</th>
                             </tr>
                         </thead>
                         <tbody id="tokenTableBody" class="divide-y divide-border">
@@ -119,6 +111,7 @@
                         </tbody>
                     </table>
                 </div>
+                <div id="accountPager" class="px-4 pb-4"></div>
             </div>
         </div>
 
@@ -127,139 +120,145 @@
             <div class="grid gap-6 lg:grid-cols-2">
                 <!-- 安全配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">安全配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">管理员登录</h3>
                     <div class="space-y-4 flex-1">
                         <div>
                             <label class="text-sm font-medium mb-2 block">管理员用户名</label>
                             <input id="cfgAdminUsername" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                            <p class="text-xs text-muted-foreground mt-1">管理员用户名</p>
                         </div>
                         <div>
-                            <label class="text-sm font-medium mb-2 block">旧密码</label>
-                            <input id="cfgOldPassword" type="password" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="输入旧密码">
+                            <label class="text-sm font-medium mb-2 block">当前密码</label>
+                            <input id="cfgUsernamePassword" type="password" autocomplete="current-password" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        </div>
+                        <button onclick="updateAdminUsername()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-4" type="button">修改用户名</button>
+                        <div class="pt-3 border-t border-border">
+                            <label class="text-sm font-medium mb-2 block">当前密码</label>
+                            <input id="cfgOldPassword" type="password" autocomplete="current-password" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                         </div>
                         <div>
                             <label class="text-sm font-medium mb-2 block">新密码</label>
-                            <input id="cfgNewPassword" type="password" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="输入新密码">
+                            <input id="cfgNewPassword" type="password" autocomplete="new-password" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                         </div>
+                        <div>
+                            <label class="text-sm font-medium mb-2 block">再输入一次新密码</label>
+                            <input id="cfgNewPassword2" type="password" autocomplete="new-password" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        </div>
+                        <button onclick="updateAdminPassword()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4" type="button">修改密码</button>
                     </div>
-                    <button onclick="updateAdminPassword()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 w-full mt-4">修改密码</button>
                 </div>
 
                 <!-- API 密钥配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">API 密钥配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">调用密钥</h3>
                     <div class="space-y-4 flex-1">
                         <div>
-                            <label class="text-sm font-medium mb-2 block">当前 API Key</label>
-                            <input id="cfgCurrentAPIKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" readonly disabled>
-                            <p class="text-xs text-muted-foreground mt-1">当前使用的 API Key（只读）</p>
+                            <label class="text-sm font-medium mb-2 block">当前调用密钥</label>
+                            <input id="cfgCurrentAPIKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" readonly>
+                            <button onclick="copyCurrentKey()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-4 mt-2" type="button">复制当前密钥</button>
                         </div>
                         <div>
-                            <label class="text-sm font-medium mb-2 block">新 API Key</label>
-                            <input id="cfgNewAPIKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="输入新的 API Key">
-                            <p class="text-xs text-muted-foreground mt-1">用于客户端调用 API 的密钥</p>
+                            <label class="text-sm font-medium mb-2 block">新调用密钥</label>
+                            <input id="cfgNewAPIKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="至少 16 个字符">
+                            <p class="text-xs text-muted-foreground mt-1">程序调用时填写。更换后，已经配好的工具要改成新密钥。</p>
                         </div>
                     </div>
-                    <button onclick="updateAPIKey()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 w-full mt-4">更新 API Key</button>
+                    <button onclick="updateAPIKey()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 w-full mt-4" type="button">更换密钥</button>
                 </div>
 
                 <!-- 代理配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">代理配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">代理</h3>
+                    <p class="text-xs text-muted-foreground mb-4">访问 Google 的请求走这里。某个账号单独填了代理时，以那个账号为准。上传和下载作品可以另选一个。验证码浏览器的代理只在「验证码」里设置，不改这里。</p>
                     <div class="space-y-4 flex-1">
                         <div>
                             <label class="inline-flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" id="cfgProxyEnabled" class="h-4 w-4 rounded border-input">
-                                <span class="text-sm font-medium">启用请求代理</span>
+                                <span class="text-sm font-medium">访问 Google 时走代理</span>
                             </label>
                         </div>
                         <div>
-                            <label class="text-sm font-medium mb-2 block">请求代理地址</label>
+                            <label class="text-sm font-medium mb-2 block">访问 Google 用的代理</label>
                             <input id="cfgProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080">
                             <p class="text-xs text-muted-foreground mt-1">支持 HTTP 和 SOCKS5 代理</p>
                         </div>
                         <div class="pt-3 border-t border-border">
                             <label class="inline-flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" id="cfgMediaProxyEnabled" class="h-4 w-4 rounded border-input" onchange="toggleMediaProxyInput()">
-                                <span class="text-sm font-medium">媒体上传下载代理</span>
+                                <span class="text-sm font-medium">上传下载图片视频用另一个代理</span>
                             </label>
-                            <p class="text-xs text-muted-foreground mt-1">启用后，图片上传与图片/视频缓存下载可单独走该代理</p>
+                            <p class="text-xs text-muted-foreground mt-1">只影响上传和下载作品。留空则和访问 Google 用同一个代理。</p>
                         </div>
                         <div id="mediaProxyUrlInput" class="hidden">
-                            <label class="text-sm font-medium mb-2 block">媒体上传下载代理地址</label>
+                            <label class="text-sm font-medium mb-2 block">上传下载用的代理</label>
                             <input id="cfgMediaProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="http://127.0.0.1:7897 或 socks5://127.0.0.1:1080">
                             <p class="text-xs text-muted-foreground mt-1">支持 HTTP 和 SOCKS5 代理</p>
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-2 mt-4">
                         <button id="btnTestProxy" onclick="testProxyConfig()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-4">测试代理</button>
-                        <button onclick="saveProxyConfig()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4">保存配置</button>
+                        <p class="text-xs text-muted-foreground self-center">和本页其他设置一起，用上方的「保存更改」。</p>
                     </div>
                     <p id="proxyTestResult" class="text-xs text-muted-foreground mt-2">测试目标：<code class="bg-muted px-1 py-0.5 rounded">https://flow.google.com/</code></p>
                 </div>
 
                 <!-- 生成配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">生成配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">生成超时</h3>
                     <div class="space-y-4 flex-1">
                         <div>
                             <label class="text-sm font-medium mb-2 block">图片生成超时时间（秒）</label>
                             <input id="cfgImageTimeout" type="number" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="300" min="60" max="3600">
-                            <p class="text-xs text-muted-foreground mt-1">图片生成超时时间，范围：60-3600 秒（1分钟-1小时），超时后自动释放Token锁</p>
+                            <p class="text-xs text-muted-foreground mt-1">60–3600 秒。超时后这次图片生成失败。</p>
                         </div>
                         <div>
                             <label class="text-sm font-medium mb-2 block">视频生成超时时间（秒）</label>
                             <input id="cfgVideoTimeout" type="number" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="1500" min="60" max="7200">
-                            <p class="text-xs text-muted-foreground mt-1">视频生成超时时间，范围：60-7200 秒（1分钟-2小时），超时后返回上游API超时错误</p>
+                            <p class="text-xs text-muted-foreground mt-1">60–7200 秒。超时后这次视频生成失败。</p>
                         </div>
                         <div>
                             <label class="text-sm font-medium mb-2 block">最大重试次数</label>
                             <input id="cfgMaxRetries" type="number" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="3" min="1">
-                            <p class="text-xs text-muted-foreground mt-1">生成、上传、轮询等请求失败时的最大重试次数，最小值为 1</p>
+                            <p class="text-xs text-muted-foreground mt-1">上传、生成或查询失败时最多再试几次。最少 1 次。</p>
                         </div>
                     </div>
-                    <button onclick="saveGenerationTimeout()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 w-full mt-4">保存配置</button>
+                    <p class="text-xs text-muted-foreground mt-4">用页面上方的「保存更改」。</p>
                 </div>
 
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">Token 轮询配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">多个账号如何挑选</h3>
                     <div class="space-y-4 flex-1">
                         <div>
-                            <label class="text-sm font-medium mb-2 block">轮询模式</label>
+                            <label class="text-sm font-medium mb-2 block">挑选方式</label>
                             <select id="cfgCallLogicMode" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                                <option value="default">随机轮询</option>
-                                <option value="polling">顺序轮询</option>
+                                <option value="default">随机</option>
+                                <option value="polling">按顺序</option>
                             </select>
-                            <p class="text-xs text-muted-foreground mt-1">随机轮询使用默认负载优先策略；顺序轮询会按可用Token的稳定顺序依次使用，全部轮完后再开始下一轮。</p>
+                            <p class="text-xs text-muted-foreground mt-1">随机会优先用比较空闲的账号。按顺序会把可用账号轮流用完，再开始下一轮。</p>
                         </div>
                     </div>
-                    <button onclick="saveCallLogicConfig()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 w-full mt-4">保存配置</button>
                 </div>
 
                 <!-- 错误处理配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">错误处理配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">连续失败后停用</h3>
                     <div class="space-y-4 flex-1">
                         <div>
-                            <label class="text-sm font-medium mb-2 block">错误封禁阈值</label>
+                            <label class="text-sm font-medium mb-2 block">连续失败几次后停用这个账号</label>
                             <input id="cfgErrorBan" type="number" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="3">
-                            <p class="text-xs text-muted-foreground mt-1">Token 连续错误达到此次数后自动禁用</p>
                         </div>
                     </div>
-                    <button onclick="saveAdminConfig()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 w-full mt-4">保存配置</button>
                 </div>
 
                 <!-- 缓存配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">缓存配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">本机保留结果</h3>
                     <div class="space-y-4 flex-1">
                         <div>
                             <label class="inline-flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" id="cfgCacheEnabled" class="h-4 w-4 rounded border-input" onchange="toggleCacheOptions()">
-                                <span class="text-sm font-medium">启用缓存</span>
+                                <span class="text-sm font-medium">把生成结果留在本机</span>
                             </label>
-                            <p class="text-xs text-muted-foreground mt-1">关闭后，生成的图片和视频将直接输出原始链接，不会缓存到本地</p>
+                            <p class="text-xs text-muted-foreground mt-1">关闭后，接口直接返回 Google 的原始链接。</p>
                         </div>
 
                         <!-- 缓存配置选项 -->
@@ -270,9 +269,9 @@
                                 <p class="text-xs text-muted-foreground mt-1">文件缓存超时时间，范围：0-86400 秒，其中 0 表示永不过期，不自动删除缓存文件</p>
                             </div>
                             <div>
-                                <label class="text-sm font-medium mb-2 block">缓存文件访问域名</label>
+                                <label class="text-sm font-medium mb-2 block">对外分享时使用的域名</label>
                                 <input id="cfgCacheBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://yourdomain.com">
-                                <p class="text-xs text-muted-foreground mt-1">留空则使用服务器地址，例如：https://yourdomain.com</p>
+                                <p class="text-xs text-muted-foreground mt-1">只在别人通过公网打开作品时需要。留空就用这台服务自己的地址。</p>
                             </div>
                             <div id="cacheEffectiveUrl" class="rounded-md bg-muted p-3 hidden">
                                 <p class="text-xs text-muted-foreground">
@@ -281,65 +280,64 @@
                             </div>
                         </div>
                     </div>
-                    <button onclick="saveCacheConfig()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 w-full mt-4">保存配置</button>
+                    <p class="text-xs text-muted-foreground mt-4">用页面上方的「保存更改」。</p>
                 </div>
 
                 <!-- 插件连接配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">插件连接配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">Chrome 扩展</h3>
                     <div class="space-y-4 flex-1">
                         <div>
-                            <label class="text-sm font-semibold mb-2 block">连接接口</label>
+                            <label class="text-sm font-semibold mb-2 block">扩展要填的地址</label>
                             <div class="flex gap-2">
                                 <input id="cfgPluginConnectionUrl" type="text" readonly class="flex h-9 flex-1 rounded-md border border-input bg-muted px-3 py-2 text-sm" placeholder="加载中...">
                                 <button onclick="copyConnectionUrl()" class="inline-flex items-center justify-center rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 h-9 px-4">复制</button>
                             </div>
-                            <p class="text-xs text-muted-foreground mt-1">Chrome扩展插件需要配置此接口地址</p>
+                            <p class="text-xs text-muted-foreground mt-1">把这个地址填进 Chrome 扩展。</p>
                         </div>
                         <div>
-                            <label class="text-sm font-semibold mb-2 block">连接Token</label>
+                            <label class="text-sm font-semibold mb-2 block">扩展要填的口令</label>
                             <div class="flex gap-2">
                                 <input id="cfgPluginConnectionToken" type="text" class="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="留空自动生成">
                                 <button onclick="generateRandomToken()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4">随机</button>
                                 <button onclick="copyConnectionToken()" class="inline-flex items-center justify-center rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 h-9 px-4">复制</button>
                             </div>
-                            <p class="text-xs text-muted-foreground mt-1">用于验证Chrome扩展插件的身份，留空将自动生成随机token</p>
+                            <p class="text-xs text-muted-foreground mt-1">扩展用来证明自己的身份。留空会在保存时生成。</p>
                         </div>
                         <div>
                             <label class="inline-flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" id="cfgAutoEnableOnUpdate" class="h-4 w-4 rounded border-input">
-                                <span class="text-sm font-medium">更新token时自动启用</span>
+                                <span class="text-sm font-medium">扩展更新后自动重新启用账号</span>
                             </label>
-                            <p class="text-xs text-muted-foreground mt-2">当插件更新token时，如果该token被禁用，则自动启用它</p>
+                            <p class="text-xs text-muted-foreground mt-2">账号被停用后，扩展再同步一次登录，就自动改回可用。</p>
                         </div>
                         <div class="rounded-md bg-blue-50 dark:bg-blue-900/20 p-3 border border-blue-200 dark:border-blue-800">
                             <p class="text-xs text-blue-800 dark:text-blue-200">
-                                ℹ️ <strong>使用说明：</strong>安装最新版Chrome扩展后，将连接接口和Token配置到插件中，插件会自动提取Google Flow登录Cookie并更新到系统
+                                安装 Chrome 扩展后，把上面的地址和口令填进去。扩展会把 Google Flow 的登录状态同步过来。
                             </p>
                         </div>
                     </div>
-                    <button onclick="savePluginConfig()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 w-full mt-4">保存配置</button>
+                    <p class="text-xs text-muted-foreground mt-4">用页面上方的「保存更改」。</p>
                 </div>
 
                 <!-- 验证码配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">验证码配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">验证码</h3>
                     <div class="space-y-4 flex-1">
                         <div>
-                            <label class="text-sm font-medium mb-2 block">打码方式</label>
+                            <label class="text-sm font-medium mb-2 block">验证码从哪来</label>
                             <select id="cfgCaptchaMethod" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" onchange="toggleCaptchaOptions()">
-                                <option value="yescaptcha">YesCaptcha打码</option>
-                                <option value="captcharun">Captcha.run打码</option>
-                                <option value="twocaptcha">2Captcha打码</option>
-                                <option value="capsolver">CapSolver打码</option>
-                                <option value="capmonster">CapMonster打码</option>
-                                <option value="ezcaptcha">EzCaptcha打码</option>
-                                <option value="browser">有头浏览器打码</option>
-                                <option value="personal">内置浏览器打码</option>
+                                <option value="yescaptcha">YesCaptcha</option>
+                                <option value="captcharun">Captcha.run</option>
+                                <option value="twocaptcha">2Captcha</option>
+                                <option value="capsolver">CapSolver</option>
+                                <option value="capmonster">CapMonster</option>
+                                <option value="ezcaptcha">EzCaptcha</option>
+                                <option value="browser">有头浏览器</option>
+                                <option value="personal">内置浏览器</option>
                                 <option value="ego_browser">已登录的 ego lite 浏览器</option>
-                                <option value="remote_browser">远程有头打码</option>
+                                <option value="remote_browser">远程浏览器</option>
                             </select>
-                            <p class="text-xs text-muted-foreground mt-1">选择验证码获取方式</p>
                         </div>
 
                         <!-- YesCaptcha配置选项 -->
@@ -347,23 +345,27 @@
                             <div>
                                 <label class="text-sm font-medium mb-2 block">YesCaptcha API密钥</label>
                                 <input id="cfgYescaptchaApiKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="请输入YesCaptcha API密钥">
-                                <p class="text-xs text-muted-foreground mt-1">用于自动获取reCAPTCHA验证码，留空则不使用验证码 · <a href="https://yescaptcha.com/i/13Xd8K" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">获取 API Key</a></p>
+                                <p class="text-xs text-muted-foreground mt-1">留空则不使用这个服务。 · <a href="https://yescaptcha.com/i/13Xd8K" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">获取密钥</a></p>
                             </div>
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">YesCaptcha API地址</label>
-                                <input id="cfgYescaptchaBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.yescaptcha.com">
-                                <p class="text-xs text-muted-foreground mt-1">YesCaptcha服务地址，默认：https://api.yescaptcha.com</p>
-                            </div>
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">YesCaptcha Type</label>
-                                <select id="cfgYescaptchaTaskType" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                                    <option value="RecaptchaV3TaskProxyless">RecaptchaV3TaskProxyless - 20 POINTS</option>
-                                    <option value="RecaptchaV3TaskProxylessM1">RecaptchaV3TaskProxylessM1 - 25 POINTS</option>
-                                    <option value="RecaptchaV3TaskProxylessM1S7">RecaptchaV3TaskProxylessM1S7 - 30 POINTS (minScore 0.7)</option>
-                                    <option value="RecaptchaV3TaskProxylessM1S9">RecaptchaV3TaskProxylessM1S9 - 35 POINTS (minScore 0.9)</option>
-                                </select>
-                                <p class="text-xs text-muted-foreground mt-1">S7/S9 会随 createTask 强制提交 minScore 0.7/0.9。</p>
-                            </div>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="space-y-4 pt-3">
+                                    <div>
+                                        <label class="text-sm font-medium mb-2 block">服务地址</label>
+                                        <input id="cfgYescaptchaBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.yescaptcha.com">
+                                    </div>
+                                    <div>
+                                        <label class="text-sm font-medium mb-2 block">成功率</label>
+                                        <select id="cfgYescaptchaTaskType" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                                            <option value="RecaptchaV3TaskProxyless">普通 · 20 点</option>
+                                            <option value="RecaptchaV3TaskProxylessM1">普通 · 25 点</option>
+                                            <option value="RecaptchaV3TaskProxylessM1S7">更高成功率 · 30 点</option>
+                                            <option value="RecaptchaV3TaskProxylessM1S9">最高成功率 · 35 点</option>
+                                        </select>
+                                        <p class="text-xs text-muted-foreground mt-1">成功率越高，每次消耗的点数越多。</p>
+                                    </div>
+                                </div>
+                            </details>
                         </div>
 
                         <!-- Captcha.run配置选项 -->
@@ -371,13 +373,15 @@
                             <div>
                                 <label class="text-sm font-medium mb-2 block">Captcha.run API密钥</label>
                                 <input id="cfgCaptcharunApiKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="请输入Captcha.run API密钥">
-                                <p class="text-xs text-muted-foreground mt-1">用于自动获取reCAPTCHA验证码 · <a href="https://captcha.run/sso?inviter=36179602-dbd1-4227-8ec8-98f8c0170c59" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">获取 API Key</a></p>
+                                <p class="text-xs text-muted-foreground mt-1"><a href="https://captcha.run/sso?inviter=36179602-dbd1-4227-8ec8-98f8c0170c59" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">获取密钥</a></p>
                             </div>
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">Captcha.run API地址</label>
-                                <input id="cfgCaptcharunBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.captcha-run.com">
-                                <p class="text-xs text-muted-foreground mt-1">Captcha.run服务地址，默认：https://api.captcha-run.com</p>
-                            </div>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="pt-3">
+                                    <label class="text-sm font-medium mb-2 block">服务地址</label>
+                                    <input id="cfgCaptcharunBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.captcha-run.com">
+                                </div>
+                            </details>
                         </div>
 
                         <!-- 2Captcha配置选项 -->
@@ -385,13 +389,15 @@
                             <div>
                                 <label class="text-sm font-medium mb-2 block">2Captcha API密钥</label>
                                 <input id="cfgTwocaptchaApiKey" type="password" autocomplete="off" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="请输入2Captcha API密钥">
-                                <p class="text-xs text-muted-foreground mt-1">用于获取reCAPTCHA v3 Enterprise验证码 · <a href="https://2captcha.com/auth/register/?from=24953866" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">获取 API Key</a></p>
+                                <p class="text-xs text-muted-foreground mt-1"><a href="https://2captcha.com/auth/register/?from=24953866" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">获取密钥</a></p>
                             </div>
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">2Captcha API地址</label>
-                                <input id="cfgTwocaptchaBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.2captcha.com">
-                                <p class="text-xs text-muted-foreground mt-1">2Captcha API v2服务地址，默认：https://api.2captcha.com</p>
-                            </div>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="pt-3">
+                                    <label class="text-sm font-medium mb-2 block">服务地址</label>
+                                    <input id="cfgTwocaptchaBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.2captcha.com">
+                                </div>
+                            </details>
                         </div>
 
                         <!-- CapMonster配置选项 -->
@@ -399,13 +405,14 @@
                             <div>
                                 <label class="text-sm font-medium mb-2 block">CapMonster API密钥</label>
                                 <input id="cfgCapmonsterApiKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="请输入CapMonster API密钥">
-                                <p class="text-xs text-muted-foreground mt-1">用于自动获取reCAPTCHA验证码</p>
-                            </div>
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">CapMonster API地址</label>
-                                <input id="cfgCapmonsterBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.capmonster.cloud">
-                                <p class="text-xs text-muted-foreground mt-1">CapMonster服务地址，默认：https://api.capmonster.cloud</p>
-                            </div>
+                                </div>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="pt-3">
+                                    <label class="text-sm font-medium mb-2 block">服务地址</label>
+                                    <input id="cfgCapmonsterBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.capmonster.cloud">
+                                </div>
+                            </details>
                         </div>
 
                         <!-- EzCaptcha配置选项 -->
@@ -413,13 +420,14 @@
                             <div>
                                 <label class="text-sm font-medium mb-2 block">EzCaptcha API密钥</label>
                                 <input id="cfgEzcaptchaApiKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="请输入EzCaptcha API密钥">
-                                <p class="text-xs text-muted-foreground mt-1">用于自动获取reCAPTCHA验证码</p>
-                            </div>
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">EzCaptcha API地址</label>
-                                <input id="cfgEzcaptchaBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.ez-captcha.com">
-                                <p class="text-xs text-muted-foreground mt-1">EzCaptcha服务地址，默认：https://api.ez-captcha.com</p>
-                            </div>
+                                </div>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="pt-3">
+                                    <label class="text-sm font-medium mb-2 block">服务地址</label>
+                                    <input id="cfgEzcaptchaBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.ez-captcha.com">
+                                </div>
+                            </details>
                         </div>
 
                         <!-- CapSolver配置选项 -->
@@ -427,162 +435,132 @@
                             <div>
                                 <label class="text-sm font-medium mb-2 block">CapSolver API密钥</label>
                                 <input id="cfgCapsolverApiKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="请输入CapSolver API密钥">
-                                <p class="text-xs text-muted-foreground mt-1">用于自动获取reCAPTCHA验证码 · <a href="https://dashboard.capsolver.com/passport/register?inviteCode=z95yVf1HvixI" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">获取 API Key</a></p>
+                                <p class="text-xs text-muted-foreground mt-1"><a href="https://dashboard.capsolver.com/passport/register?inviteCode=z95yVf1HvixI" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">获取密钥</a></p>
                             </div>
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">CapSolver API地址</label>
-                                <input id="cfgCapsolverBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.capsolver.com">
-                                <p class="text-xs text-muted-foreground mt-1">CapSolver服务地址，默认：https://api.capsolver.com</p>
-                            </div>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="pt-3">
+                                    <label class="text-sm font-medium mb-2 block">服务地址</label>
+                                    <input id="cfgCapsolverBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="https://api.capsolver.com">
+                                </div>
+                            </details>
                         </div>
 
                         <!-- 浏览器打码配置选项 -->
                         <div id="browserCaptchaOptions" class="hidden space-y-4">
-                            <div class="rounded-md bg-blue-50 dark:bg-blue-900/20 p-3 border border-blue-200 dark:border-blue-800">
-                                <p class="text-xs text-blue-800 dark:text-blue-200">
-                                    ℹ️ <strong>浏览器打码：</strong>使用Playwright自动化浏览器获取验证码，无需额外配置，但会占用更多系统资源
-                                </p>
-                            </div>
-
-                            <div>
-                                <label class="inline-flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" id="cfgBrowserProxyEnabled" class="h-4 w-4 rounded border-input" onchange="toggleBrowserProxyInput()">
-                                    <span class="text-sm font-medium">启用代理</span>
-                                </label>
-                                <p class="text-xs text-muted-foreground mt-2">为有头浏览器配置独立代理</p>
-                            </div>
-
-                            <div id="browserProxyUrlInput" class="hidden">
-                                <label class="text-sm font-medium mb-2 block">代理地址</label>
-                                <input id="cfgBrowserProxyUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="http://host:port 或 socks5://host:port">
-                                <p class="text-xs text-muted-foreground mt-1">
-                                    ✅ <strong>支持：</strong>HTTP/HTTPS/SOCKS5/SOCKS5H 代理，均支持带认证<br>
-                                    示例：<code class="bg-muted px-1 py-0.5 rounded">http://user:pass@proxy.com:8080</code> 或 <code class="bg-muted px-1 py-0.5 rounded">socks5://user:pass@proxy.com:1080</code>
-                                </p>
-                            </div>
-
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">浏览器数量</label>
-                                <input id="cfgBrowserCount" type="number" min="1" max="20" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="1" value="1">
-                                <p class="text-xs text-muted-foreground mt-1">同时启动的浏览器实例数量，每个浏览器只开1个标签页，请求轮询分配</p>
-                            </div>
+                            <p class="text-xs text-muted-foreground">会打开一个看得见的浏览器来通过验证码。比接口慢，也更占这台电脑的资源。</p>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="space-y-4 pt-3">
+                                    <div>
+                                        <label class="inline-flex items-center gap-2 cursor-pointer">
+                                            <input type="checkbox" id="cfgBrowserProxyEnabled" class="h-4 w-4 rounded border-input" onchange="toggleBrowserProxyInput()">
+                                            <span class="text-sm font-medium">这个浏览器单独走代理</span>
+                                        </label>
+                                    </div>
+                                    <div id="browserProxyUrlInput" class="hidden">
+                                        <label class="text-sm font-medium mb-2 block">浏览器代理</label>
+                                        <input id="cfgBrowserProxyUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="http://host:port 或 socks5://host:port">
+                                    </div>
+                                    <div>
+                                        <label class="text-sm font-medium mb-2 block">同时打开几个浏览器</label>
+                                        <input id="cfgBrowserCount" type="number" min="1" max="20" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="1" value="1">
+                                    </div>
+                                </div>
+                            </details>
                         </div>
 
                         <!-- 内置浏览器打码配置选项 -->
                         <div id="personalOptions" class="hidden space-y-4">
-                            <div class="rounded-md bg-blue-50 dark:bg-blue-900/20 p-3 border border-blue-200 dark:border-blue-800">
-                                <p class="text-xs text-blue-800 dark:text-blue-200">
-                                    ℹ️ <strong>内置浏览器打码：</strong>使用nodriver自动化浏览器获取验证码，支持标签页复用，性能更优
-                                </p>
-                            </div>
-
+                            <p class="text-xs text-muted-foreground">用内置浏览器通过验证码。多个请求可以共用标签页。</p>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="space-y-4 pt-3">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="text-sm font-medium mb-2 block">浏览器实例数量</label>
                                     <input id="cfgPersonalBrowserCount" type="number" min="1" max="20" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="1" value="1">
-                                    <p class="text-xs text-muted-foreground mt-1">
-                                        personal 模式真实浏览器实例数。<br>
-                                        有效槽位约等于 实例数 × 单实例标签页，上限 50。
-                                    </p>
+                                    <p class="text-xs text-muted-foreground mt-1">和「每个浏览器最多几个标签页」相乘，就是能同时处理的数量，最多 50。</p>
                                 </div>
 
                                 <div>
-                                    <label class="text-sm font-medium mb-2 block">单 Token 项目池大小</label>
+                                    <label class="text-sm font-medium mb-2 block">每个账号可轮换的项目数</label>
                                     <input id="cfgPersonalProjectPoolSize" type="number" min="1" max="50" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="4" value="4">
-                                    <p class="text-xs text-muted-foreground mt-1">
-                                        只影响该 Token 可轮换的 project_id 数量，不决定打码标签页数。<br>
-                                        打码标签页由全局共享池统一复用。
-                                    </p>
+                                    <p class="text-xs text-muted-foreground mt-1">只决定这个账号能轮换几个 Flow 项目。</p>
                                 </div>
 
                                 <div>
-                                    <label class="text-sm font-medium mb-2 block">单实例最大标签页</label>
+                                    <label class="text-sm font-medium mb-2 block">每个浏览器最多几个标签页</label>
                                     <input id="cfgPersonalMaxTabs" type="number" min="1" max="50" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="5" value="5">
-                                    <p class="text-xs text-muted-foreground mt-1">
-                                        每个浏览器最多保留多少个共享打码标签页。<br>
-                                        总并发槽位约为 浏览器实例数 × 这里，上限 50。
-                                    </p>
+                                    <p class="text-xs text-muted-foreground mt-1">所有账号共用这些标签页。</p>
                                 </div>
 
                                 <div>
                                     <label class="text-sm font-medium mb-2 block">重置码数</label>
                                     <input id="cfgPersonalFreshRestartEveryNSolves" type="number" min="0" max="999" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="10" value="10">
-                                    <p class="text-xs text-muted-foreground mt-1">
-                                        成功获取多少个码后清理并重启浏览器。<br>
-                                        高并发建议 0 或 >=50，5/10 会频繁重启导致排队。
-                                    </p>
+                                    <p class="text-xs text-muted-foreground mt-1">成功拿到这么多个验证码后，重启浏览器。填 0 表示不自动重启。</p>
                                 </div>
                             </div>
 
                             <div>
-                                <label class="text-sm font-medium mb-2 block">标签空闲超时(秒)</label>
+                                <label class="text-sm font-medium mb-2 block">标签页闲置多少秒后关掉</label>
                                 <input id="cfgPersonalIdleTTL" type="number" min="60" max="3600" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="600" value="600">
-                                <p class="text-xs text-muted-foreground mt-1">标签页空闲多久后自动回收，默认600秒(10分钟)</p>
                             </div>
 
                             <div class="pt-3 border-t border-border">
                                 <label class="inline-flex items-center gap-2 cursor-pointer">
                                     <input type="checkbox" id="cfgPersonalProxyEnabled" class="h-4 w-4 rounded border-input" onchange="togglePersonalProxyInput()">
-                                    <span class="text-sm font-medium">启用代理</span>
+                                    <span class="text-sm font-medium">这个浏览器单独走代理</span>
                                 </label>
-                                <p class="text-xs text-muted-foreground mt-2">为内置浏览器配置独立代理（优先级高于全局请求代理）</p>
+                                <p class="text-xs text-muted-foreground mt-2">只给这个浏览器用。填写后，不再使用上面的「访问 Google 用的代理」。</p>
                             </div>
 
                             <div id="personalProxyUrlInput" class="hidden">
-                                <label class="text-sm font-medium mb-2 block">代理地址</label>
+                                <label class="text-sm font-medium mb-2 block">浏览器代理</label>
                                 <input id="cfgPersonalProxyUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="http://host:port 或 socks5://host:port">
-                                <p class="text-xs text-muted-foreground mt-1">
-                                    ✅ <strong>支持：</strong>HTTP/HTTPS/SOCKS5/SOCKS5H 代理，均支持带认证<br>
-                                    示例：<code class="bg-muted px-1 py-0.5 rounded">http://user:pass@proxy.com:8080</code> 或 <code class="bg-muted px-1 py-0.5 rounded">socks5://user:pass@proxy.com:1080</code>
-                                </p>
                             </div>
+                                </div>
+                            </details>
                         </div>
 
                         <!-- 远程有头打码配置选项 -->
                         <div id="remoteBrowserOptions" class="hidden space-y-4">
-                            <div class="rounded-md bg-blue-50 dark:bg-blue-900/20 p-3 border border-blue-200 dark:border-blue-800">
-                                <p class="text-xs text-blue-800 dark:text-blue-200">
-                                    ℹ️ <strong>远程有头打码：</strong>通过 HTTP 调用独立打码服务获取 token，并在请求结束后回调 finish/error
-                                </p>
-                            </div>
+                            <p class="text-xs text-muted-foreground">把验证码交给另一台打码服务。</p>
                             <div>
-                                <label class="text-sm font-medium mb-2 block">远程服务 Base URL</label>
+                                <label class="text-sm font-medium mb-2 block">服务地址</label>
                                 <input id="cfgRemoteBrowserBaseUrl" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="http://127.0.0.1:8060">
-                                <p class="text-xs text-muted-foreground mt-1">示例：<code class="bg-muted px-1 py-0.5 rounded">http://127.0.0.1:8060</code></p>
                             </div>
                             <div>
-                                <label class="text-sm font-medium mb-2 block">远程服务 API Key</label>
-                                <input id="cfgRemoteBrowserApiKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="fcs_xxx">
+                                <label class="text-sm font-medium mb-2 block">服务密钥</label>
+                                <input id="cfgRemoteBrowserApiKey" type="text" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="远程服务要求的密钥">
                             </div>
-                            <div>
-                                <label class="text-sm font-medium mb-2 block">远程请求超时（秒）</label>
-                                <input id="cfgRemoteBrowserTimeout" type="number" min="5" max="300" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="60" value="60">
-                            </div>
+                            <details class="advanced">
+                                <summary>更多设置</summary>
+                                <div class="pt-3">
+                                    <label class="text-sm font-medium mb-2 block">等待秒数</label>
+                                    <input id="cfgRemoteBrowserTimeout" type="number" min="5" max="300" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="60" value="60">
+                                </div>
+                            </details>
                         </div>
                     </div>
                     <div class="mt-4">
-                        <button onclick="saveCaptchaConfig()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4">保存配置</button>
+                        <p class="text-xs text-muted-foreground">用页面上方的「保存更改」。</p>
                     </div>
                 </div>
 
                 <!-- 调试配置 -->
                 <div class="rounded-lg border border-border bg-background p-6 flex flex-col">
-                    <h3 class="text-lg font-semibold mb-4">调试配置</h3>
+                    <h3 class="text-lg font-semibold mb-4">排错日志</h3>
                     <div class="space-y-4 flex-1">
                         <div>
                             <label class="inline-flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" id="cfgDebugEnabled" class="h-4 w-4 rounded border-input" onchange="toggleDebugMode()">
-                                <span class="text-sm font-medium">启用调试模式</span>
+                                <input type="checkbox" id="cfgDebugEnabled" class="h-4 w-4 rounded border-input">
+                                <span class="text-sm font-medium">写入详细请求日志</span>
                             </label>
-                            <p class="text-xs text-muted-foreground mt-2">开启后，详细的上游API请求和响应日志将写入 <code class="bg-muted px-1 py-0.5 rounded">logs.txt</code> 文件</p>
-                        </div>
-                        <div class="rounded-md bg-yellow-50 dark:bg-yellow-900/20 p-3 border border-yellow-200 dark:border-yellow-800">
-                            <p class="text-xs text-yellow-800 dark:text-yellow-200">
-                                ⚠️ <strong>注意：</strong>调试模式会产生非常非常大量的日志，仅限Debug时候开启，否则磁盘boom
-                            </p>
+                            <p class="text-xs text-muted-foreground mt-2">会把上游请求和响应写进 <code class="bg-muted px-1 py-0.5 rounded">logs.txt</code>。日志会非常多，只在排错时打开。</p>
                         </div>
                     </div>
-                    <div class="text-xs text-muted-foreground text-center mt-4 h-9 flex items-center justify-center">✅ 开关状态自动保存</div>
+                    <p class="text-xs text-muted-foreground mt-4">用页面上方的「保存更改」。</p>
                 </div>
             </div>
         </div>
@@ -593,32 +571,28 @@
                 <div class="flex items-center justify-between gap-4 p-4 border-b border-border">
                     <h3 class="text-lg font-semibold">请求日志</h3>
                     <div class="flex gap-2">
-                        <button onclick="clearAllLogs()" class="inline-flex items-center justify-center rounded-md transition-colors hover:bg-red-50 hover:text-red-700 h-8 px-3 text-sm" title="清空日志">
-                            <svg class="h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                            </svg>
-                            清空
-                        </button>
-                        <button onclick="refreshLogs()" class="inline-flex items-center justify-center rounded-md transition-colors hover:bg-accent h-8 w-8" title="刷新">
-                            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                            </svg>
-                        </button>
+                        <button onclick="clearAllLogs()" class="inline-flex items-center justify-center rounded-md transition-colors hover:bg-red-50 hover:text-red-700 h-8 px-3 text-sm" type="button">清空全部日志</button>
+                        <button onclick="refreshLogs()" class="inline-flex items-center justify-center rounded-md border border-input h-8 px-3 text-sm" type="button">刷新</button>
                     </div>
                 </div>
+                <div class="list-toolbar px-4 pt-4">
+                    <input id="logSearch" type="search" aria-label="搜索日志" placeholder="搜索账号或结果">
+                    <select id="logStatus" aria-label="结果筛选"><option value="all">全部结果</option><option value="ok">成功</option><option value="fail">失败</option><option value="run">进行中</option></select>
+                    <select id="logKind" aria-label="类型筛选"><option value="all">图片和视频</option><option value="image">图片</option><option value="video">视频</option></select>
+                    <button type="button" class="btn" id="sortLogTime">时间</button>
+                    <button type="button" class="btn" id="sortLogDuration">耗时</button>
+                </div>
+                <p id="logRefreshNote" class="muted px-4">每 5 秒自动更新最近 500 条。</p>
+                <p id="logEmpty" class="muted px-4" hidden>没有匹配的日志。</p>
                 <div class="relative w-full overflow-auto max-h-[600px]">
                     <table class="w-full table-auto text-sm">
                         <thead class="sticky top-0 bg-background">
                             <tr class="border-b border-border">
-                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">&#25805;&#20316;</th>
-                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">Token&#37038;&#31665;</th>
-                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">&#29366;&#24577;</th>
-                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">&#36827;&#24230;</th>
-                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">&#29366;&#24577;&#30721;</th>
-                                <th class="h-10 w-[17rem] px-3 text-left align-middle font-medium text-muted-foreground">结果摘要</th>
-                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">&#32791;&#26102;(&#31186;)</th>
-                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">&#26102;&#38388;</th>
-                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">&#35814;&#24773;</th>
+                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">时间</th>
+                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">结果</th>
+                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">账号</th>
+                                <th class="h-10 px-3 text-left align-middle font-medium text-muted-foreground">耗时</th>
+                                <th class="h-10 px-3 text-right align-middle font-medium text-muted-foreground">操作</th>
                             </tr>
                         </thead>
                         <tbody id="logsTableBody" class="divide-y divide-border">
@@ -626,6 +600,7 @@
                         </tbody>
                     </table>
                 </div>
+                <div id="logPager" class="px-4 pb-4"></div>
             </div>
         </div>
 
@@ -680,44 +655,44 @@
                     <p class="text-xs text-muted-foreground">用于稳定识别账号并接收浏览器扩展后续推送</p>
                 </div>
 
-                <!-- Remark -->
-                <div class="space-y-2">
-                    <label class="text-sm font-medium">备注 <span class="text-muted-foreground text-xs">- 可选</span></label>
-                    <input id="addTokenRemark" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="添加备注信息">
+                <details class="advanced"><summary>高级设置</summary>
+                <div class="space-y-2 mt-3">
+                    <label class="text-sm font-medium">备注</label>
+                    <input id="addTokenRemark" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="给这个账号写一句备注">
                 </div>
 
                 <!-- Project ID -->
                 <div class="space-y-2">
-                    <label class="text-sm font-medium">Project ID <span class="text-muted-foreground text-xs">- 可选</span></label>
-                    <input id="addTokenProjectId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="若不填写则系统自动生成">
-                    <p class="text-xs text-muted-foreground">如果已有Project ID可直接输入,留空则创建新项目</p>
+                    <label class="text-sm font-medium">Flow 项目 ID</label>
+                    <input id="addTokenProjectId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="留空会新建项目">
+                    <p class="text-xs text-muted-foreground">已经有 Flow 项目时才填。留空会新建一个。</p>
                 </div>
 
                 <!-- Project Name -->
                 <div class="space-y-2">
-                    <label class="text-sm font-medium">Project Name <span class="text-muted-foreground text-xs">- 可选</span></label>
-                    <input id="addTokenProjectName" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="若不填写则自动生成 (如: Jan 01 - 12:00)">
+                    <label class="text-sm font-medium">Flow 项目名称</label>
+                    <input id="addTokenProjectName" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="留空会自动命名">
                 </div>
 
                 <!-- Captcha Proxy -->
                 <div class="space-y-2">
-                    <label class="text-sm font-medium">打码代理 <span class="text-muted-foreground text-xs">- 可选</span></label>
+                    <label class="text-sm font-medium">这个账号的验证码代理</label>
                     <input id="addTokenCaptchaProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="例如 http://user:pass@host:port">
-                    <p class="text-xs text-muted-foreground">仅覆盖当前 Token 的浏览器打码代理，留空则使用全局打码代理</p>
+                    <p class="text-xs text-muted-foreground">只影响这个账号的验证码。留空则用系统配置里的验证码代理。</p>
                 </div>
 
                 <div class="space-y-4 pt-2 border-t border-border">
                     <label class="text-sm font-medium">登录态维护</label>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="space-y-2 md:col-span-2">
-                            <label class="text-sm font-medium">协议代理 <span class="text-muted-foreground text-xs">- 可选</span></label>
-                            <input id="addTokenProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="例如 http://user:pass@host:port">
+                            <label class="text-sm font-medium">这个账号访问 Google 用的代理</label>
+                            <input id="addTokenProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="留空则用系统配置里的代理">
                         </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-3">
                         <label class="inline-flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" id="addTokenAutoRefreshEnabled" checked class="h-4 w-4 rounded border-input">
-                            <span class="text-sm font-medium">启用登录态定时校验</span>
+                            <span class="text-sm font-medium">定时检查这个账号是否仍登录</span>
                         </label>
                         <div class="flex items-center gap-2">
                             <span class="text-sm text-muted-foreground">刷新间隔</span>
@@ -736,7 +711,8 @@
                                 <input type="checkbox" id="addTokenImageEnabled" checked class="h-4 w-4 rounded border-input">
                                 <span class="text-sm font-medium">启用图片生成</span>
                             </label>
-                            <input type="number" id="addTokenImageConcurrency" value="-1" class="flex h-8 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="并发数" title="并发数量限制：设置同时处理的最大请求数。-1表示不限制">
+                            <label class="text-sm text-muted-foreground" for="addTokenImageConcurrency">同时生成数</label>
+                            <input type="number" id="addTokenImageConcurrency" class="flex h-8 w-24 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="不限制">
                         </div>
                     </div>
                     <div class="space-y-2">
@@ -745,10 +721,12 @@
                                 <input type="checkbox" id="addTokenVideoEnabled" checked class="h-4 w-4 rounded border-input">
                                 <span class="text-sm font-medium">启用视频生成</span>
                             </label>
-                            <input type="number" id="addTokenVideoConcurrency" value="-1" class="flex h-8 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="并发数" title="并发数量限制：设置同时处理的最大请求数。-1表示不限制">
+                            <label class="text-sm text-muted-foreground" for="addTokenVideoConcurrency">同时生成数</label>
+                            <input type="number" id="addTokenVideoConcurrency" class="flex h-8 w-24 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="不限制">
                         </div>
                     </div>
                 </div>
+                </details>
             </div>
             <div class="flex items-center justify-end gap-3 p-5 border-t border-border sticky bottom-0 bg-background">
                 <button onclick="closeAddModal()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-5">取消</button>
@@ -767,7 +745,7 @@
     <div id="editModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
         <div class="bg-background rounded-lg border border-border w-full max-w-2xl shadow-xl my-auto">
             <div class="flex items-center justify-between p-5 border-b border-border sticky top-0 bg-background">
-                <h3 class="text-lg font-semibold">账号详情</h3>
+                <h3 class="text-lg font-semibold">编辑账号</h3>
                 <button onclick="closeEditModal()" class="text-muted-foreground hover:text-foreground">
                     <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -789,44 +767,41 @@
                     <input id="editTokenLoginAccount" type="email" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="name@gmail.com" required>
                 </div>
 
-                <!-- Remark -->
-                <div class="space-y-2">
-                    <label class="text-sm font-medium">备注 <span class="text-muted-foreground text-xs">- 可选</span></label>
-                    <input id="editTokenRemark" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="添加备注信息">
+                <details class="advanced"><summary>高级设置</summary>
+                <div class="space-y-2 mt-3">
+                    <label class="text-sm font-medium">备注</label>
+                    <input id="editTokenRemark" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="给这个账号写一句备注">
                 </div>
 
-                <!-- Project ID -->
                 <div class="space-y-2">
-                    <label class="text-sm font-medium">Project ID <span class="text-muted-foreground text-xs">- 可选</span></label>
-                    <input id="editTokenProjectId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="若不填写则保持原有值">
-                    <p class="text-xs text-muted-foreground">修改Project ID会更新Token使用的项目</p>
+                    <label class="text-sm font-medium">Flow 项目 ID</label>
+                    <input id="editTokenProjectId" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="留空保持现在的项目">
+                    <p class="text-xs text-muted-foreground">改这里会换掉这个账号正在用的 Flow 项目。</p>
                 </div>
 
-                <!-- Project Name -->
                 <div class="space-y-2">
-                    <label class="text-sm font-medium">Project Name <span class="text-muted-foreground text-xs">- 可选</span></label>
-                    <input id="editTokenProjectName" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="若不填写则保持原有值">
+                    <label class="text-sm font-medium">Flow 项目名称</label>
+                    <input id="editTokenProjectName" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="留空保持现在的名称">
                 </div>
 
-                <!-- Captcha Proxy -->
                 <div class="space-y-2">
-                    <label class="text-sm font-medium">打码代理 <span class="text-muted-foreground text-xs">- 可选</span></label>
+                    <label class="text-sm font-medium">这个账号的验证码代理</label>
                     <input id="editTokenCaptchaProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="例如 http://user:pass@host:port">
-                    <p class="text-xs text-muted-foreground">填写后优先覆盖全局打码代理，清空后恢复走全局打码代理</p>
+                    <p class="text-xs text-muted-foreground">只影响这个账号的验证码。清空后改回系统配置里的验证码代理。</p>
                 </div>
 
                 <div class="space-y-4 pt-2 border-t border-border">
                     <label class="text-sm font-medium">登录态维护</label>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="space-y-2 md:col-span-2">
-                            <label class="text-sm font-medium">协议代理 <span class="text-muted-foreground text-xs">- 可选</span></label>
-                            <input id="editTokenProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="例如 http://user:pass@host:port">
+                            <label class="text-sm font-medium">这个账号访问 Google 用的代理</label>
+                            <input id="editTokenProxyUrl" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono" placeholder="留空则用系统配置里的代理">
                         </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-3">
                         <label class="inline-flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" id="editTokenAutoRefreshEnabled" class="h-4 w-4 rounded border-input">
-                            <span class="text-sm font-medium">启用登录态定时校验</span>
+                            <span class="text-sm font-medium">定时检查这个账号是否仍登录</span>
                         </label>
                         <div class="flex items-center gap-2">
                             <span class="text-sm text-muted-foreground">刷新间隔</span>
@@ -845,7 +820,8 @@
                                 <input type="checkbox" id="editTokenImageEnabled" class="h-4 w-4 rounded border-input">
                                 <span class="text-sm font-medium">启用图片生成</span>
                             </label>
-                            <input type="number" id="editTokenImageConcurrency" class="flex h-8 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="并发数" title="并发数量限制：设置同时处理的最大请求数。-1表示不限制">
+                            <label class="text-sm text-muted-foreground" for="editTokenImageConcurrency">同时生成数</label>
+                            <input type="number" id="editTokenImageConcurrency" class="flex h-8 w-24 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="不限制">
                         </div>
                     </div>
                     <div class="space-y-2">
@@ -854,10 +830,12 @@
                                 <input type="checkbox" id="editTokenVideoEnabled" class="h-4 w-4 rounded border-input">
                                 <span class="text-sm font-medium">启用视频生成</span>
                             </label>
-                            <input type="number" id="editTokenVideoConcurrency" class="flex h-8 w-20 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="并发数" title="并发数量限制：设置同时处理的最大请求数。-1表示不限制">
+                            <label class="text-sm text-muted-foreground" for="editTokenVideoConcurrency">同时生成数</label>
+                            <input type="number" id="editTokenVideoConcurrency" class="flex h-8 w-24 rounded-md border border-input bg-background px-2 py-1 text-sm" placeholder="不限制">
                         </div>
                     </div>
                 </div>
+                </details>
             </div>
             <div class="flex items-center justify-end gap-3 p-5 border-t border-border sticky bottom-0 bg-background">
                 <button onclick="closeEditModal()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-5">取消</button>
@@ -910,11 +888,13 @@
         </div>
     </div>
 
+    <script src="/assets/list.js"></script>
     <script>
         let allTokens=[];
+        let quietSave=false,quietSaveFailed=false,accountList=null,logList=null;
         const $=(id)=>document.getElementById(id),
         apiRequest=async(url,opts={})=>{const headers={...opts.headers};if(!headers['Content-Type'])headers['Content-Type']='application/json';const r=await fetch(url,{credentials:'include',...opts,headers});return r.status===401?(location.href='/login',null):r},
-        loadStats=async()=>{try{const r=await apiRequest('/api/stats');if(!r)return;const d=await r.json();$('statTotal').textContent=d.total_tokens||0;$('statActive').textContent=d.active_tokens||0;$('statImages').textContent=(d.today_images||0)+'/'+(d.total_images||0);$('statVideos').textContent=(d.today_videos||0)+'/'+(d.total_videos||0);$('statErrors').textContent=(d.today_errors||0)+'/'+(d.total_errors||0)}catch(e){console.error('加载统计失败:',e)}},
+        loadStats=async()=>{try{const r=await apiRequest('/api/stats');if(!r)return;const d=await r.json();$('statTotal').textContent=d.total_tokens||0;$('statActive').textContent=d.active_tokens||0;$('statImages').textContent=d.today_images||0;if($('statImagesTotal'))$('statImagesTotal').textContent=d.total_images||0;$('statVideos').textContent=d.today_videos||0;if($('statVideosTotal'))$('statVideosTotal').textContent=d.total_videos||0}catch(e){console.error('加载统计失败:',e)}},
         loadTokens=async()=>{try{const r=await apiRequest('/api/tokens');if(!r)return;allTokens=await r.json();renderTokens()}catch(e){console.error('加载Token失败:',e)}},
         formatExpiry=exp=>{if(!exp)return'<span class="text-muted-foreground">-</span>';const d=new Date(exp),now=new Date(),diff=d-now;const dateStr=d.toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g,'-');const timeStr=d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});const hours=Math.floor(diff/36e5);if(diff<0)return`<span class="text-red-600 font-medium" title="已过期">已过期</span>`;if(hours<1)return`<span class="text-red-600 font-medium" title="${dateStr} ${timeStr}">${Math.floor(diff/6e4)}分钟</span>`;if(hours<24)return`<span class="text-orange-600 font-medium" title="${dateStr} ${timeStr}">${hours}小时</span>`;const days=Math.floor(diff/864e5);if(days<7)return`<span class="text-orange-600" title="${dateStr} ${timeStr}">${days}天</span>`;return`<span class="text-muted-foreground" title="${dateStr} ${timeStr}">${days}天</span>`},
         formatPlanType=type=>{if(!type)return'-';const typeMap={'chatgpt_team':'Team','chatgpt_plus':'Plus','chatgpt_pro':'Pro','chatgpt_free':'Free'};return typeMap[type]||type},
@@ -924,34 +904,34 @@
         formatAccountType=(tier)=>{if(tier==='PAYGATE_TIER_NOT_PAID'||!tier){return`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-gray-100 text-gray-700">Free</span>`}if(tier==='PAYGATE_TIER_ONE'){return`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-blue-50 text-blue-700">Pro</span>`}if(tier==='PAYGATE_TIER_TWO'){return`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-purple-50 text-purple-700">Ult</span>`}return`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-amber-50 text-amber-700" title="${tier}">${tier}</span>`},
         formatProjectNameDisplay=name=>{if(!name)return'<span class="text-muted-foreground">-</span>';const text=String(name);const match=text.match(/^(.*?)(?:\s+(P\d+))$/);if(match){return`<div class="flex flex-col items-center justify-center gap-1 leading-none"><span class="text-xs font-medium text-foreground whitespace-nowrap">${escapeLogHtml(match[1])}</span><span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">${escapeLogHtml(match[2])}</span></div>`}return`<div class="text-center text-xs font-medium text-foreground whitespace-nowrap">${escapeLogHtml(text)}</div>`},
         formatProjectIdDisplay=projectId=>{if(!projectId)return'<span class="text-muted-foreground">-</span>';const text=String(projectId);const short=text.length>8?`${text.substring(0,8)}...`:text;return`<button onclick="copyProjectId('${projectId}')" class="inline-flex items-center justify-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-mono font-medium text-blue-700 transition-colors hover:bg-blue-100 hover:text-blue-800" title="点击复制项目ID&#10;${escapeLogHtml(text)}">${escapeLogHtml(short)}</button>`},
-        renderTokenActions=t=>{const toggleLabel=t.is_active?'禁用':'启用';return`<div class="inline-flex flex-nowrap items-center justify-end gap-1"><button onclick="refreshTokenAT(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-blue-50 hover:text-blue-700">刷新凭证</button><button onclick="openEditModal(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-green-50 hover:text-green-700">详情</button><button onclick="toggleToken(${t.id},${t.is_active})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-accent">${toggleLabel}</button><button onclick="deleteToken(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-destructive/10 hover:text-destructive">删除</button></div>`},
-        renderTokens=()=>{const tb=$('tokenTableBody');tb.innerHTML=allTokens.map(t=>{const imageDisplay=t.image_enabled?`${t.image_count||0}`:'-';const videoDisplay=t.video_enabled?`${t.video_count||0}`:'-';const creditsDisplay=t.credits!==undefined?`${t.credits}`:'-';const accountTypeDisplay=formatAccountType(t.user_paygate_tier);const projectIdDisplay=formatProjectIdDisplay(t.current_project_id);const expiryDisplay=formatExpiry(t.at_expires);const protocolDisplay=t.protocol_mode==='protocol'?`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700" title="${escapeLogHtml(t.last_st_refresh_result||'')}">协议</span>`:`<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-gray-100 text-gray-700">ST</span>`;const tokenActions=renderTokenActions(t);return`<tr class="hover:bg-muted/20 transition-colors"><td class="py-3 px-2.5 align-middle"><div class="max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium text-foreground" title="${escapeLogHtml(t.email||'')}">${escapeLogHtml(t.email||'-')}</div></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><span class="inline-flex items-center rounded px-2 py-0.5 text-xs ${t.is_active?'bg-green-50 text-green-700':'bg-gray-100 text-gray-700'}">${t.is_active?'启用':'禁用'}</span></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap">${protocolDisplay}</td><td class="py-3 px-2.5 text-center text-xs align-middle whitespace-nowrap">${expiryDisplay}</td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><button onclick="refreshTokenCredits(${t.id})" class="inline-flex items-center justify-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 hover:text-blue-800" title="点击刷新余额"><span>${creditsDisplay}</span><svg class="h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/><path d="M15 4.5l3.5 3.5L22 4.5"/></svg></button></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap">${accountTypeDisplay}</td><td class="py-3 px-2.5 text-center text-xs align-middle whitespace-nowrap">${projectIdDisplay}</td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><span class="text-sm font-medium">${imageDisplay}</span></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><span class="text-sm font-medium">${videoDisplay}</span></td><td class="py-3 px-2.5 text-center align-middle whitespace-nowrap"><span class="text-sm font-medium ${Number(t.error_count||0)>0?'text-red-600':'text-foreground'}">${t.error_count||0}</span></td><td class="py-3 px-2.5 text-right align-middle whitespace-nowrap">${tokenActions}</td></tr>`}).join('')},
+        renderTokenActions=t=>{const toggleLabel=t.is_active?'禁用':'启用';return`<div class="inline-flex flex-nowrap items-center justify-end gap-1"><button onclick="refreshTokenAT(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-blue-50 hover:text-blue-700">重新检查登录</button><button onclick="openEditModal(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-green-50 hover:text-green-700">编辑</button><button onclick="toggleToken(${t.id},${t.is_active})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-accent">${toggleLabel}</button><button onclick="deleteToken(${t.id})" class="inline-flex h-7 items-center justify-center rounded-md px-2 text-xs font-medium hover:bg-destructive/10 hover:text-destructive">删除</button></div>`},
+        renderTokens=()=>{applyAccountList()},
         refreshTokenCredits=async(id)=>{try{showToast('正在刷新余额...','info');const r=await apiRequest(`/api/tokens/${id}/refresh-credits`,{method:'POST'});if(!r)return;const d=await r.json();if(d.success){showToast(`余额刷新成功: ${d.credits}`,'success');await refreshTokens()}else{showToast('刷新余额失败: '+(d.detail||'未知错误'),'error')}}catch(e){showToast('刷新余额失败: '+e.message,'error')}},
-        refreshTokenAT=async(id)=>{try{showToast('正在更新AT...','info');const r=await apiRequest(`/api/tokens/${id}/refresh-at`,{method:'POST'});if(!r)return;const d=await r.json();if(d.success){const expiresDate=d.token.at_expires?new Date(d.token.at_expires):null;const expiresStr=expiresDate?expiresDate.toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).replace(/\//g,'-'):'未知';showToast(`AT更新成功! 新过期时间: ${expiresStr}`,'success');await refreshTokens()}else{showToast('更新失败: '+(d.detail||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}},
+        refreshTokenAT=async(id)=>{try{showToast('正在重新检查登录...','info');const r=await apiRequest(`/api/tokens/${id}/refresh-at`,{method:'POST'});if(!r)return;const d=await r.json();if(d.success){showToast('已重新检查登录','success');await refreshTokens()}else{showToast('检查失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('检查失败: '+e.message,'error')}},
         refreshTokens=async()=>{await loadTokens();await loadStats()},
         openAddModal=()=>$('addModal').classList.remove('hidden'),
-        closeAddModal=()=>{$('addModal').classList.add('hidden');$('addTokenGoogleCookies').value='';$('addTokenLoginAccount').value='';$('addTokenRemark').value='';$('addTokenProjectId').value='';$('addTokenProjectName').value='';$('addTokenCaptchaProxyUrl').value='';$('addTokenProxyUrl').value='';$('addTokenAutoRefreshEnabled').checked=true;$('addTokenRefreshIntervalMinutes').value='120';$('addTokenImageEnabled').checked=true;$('addTokenVideoEnabled').checked=true;$('addTokenImageConcurrency').value='-1';$('addTokenVideoConcurrency').value='-1'},
-        openEditModal=(id)=>{const token=allTokens.find(t=>t.id===id);if(!token)return showToast('账号不存在','error');$('editTokenId').value=token.id;$('editTokenGoogleCookies').value=token.google_cookies||'';$('editTokenLoginAccount').value=token.login_account||token.email||'';$('editTokenRemark').value=token.remark||'';$('editTokenProjectId').value=token.current_project_id||'';$('editTokenProjectName').value=token.current_project_name||'';$('editTokenCaptchaProxyUrl').value=token.captcha_proxy_url||'';$('editTokenProxyUrl').value=token.proxy_url||'';$('editTokenAutoRefreshEnabled').checked=token.auto_refresh_enabled!==false;$('editTokenRefreshIntervalMinutes').value=token.refresh_interval_minutes||120;$('editTokenImageEnabled').checked=token.image_enabled!==false;$('editTokenVideoEnabled').checked=token.video_enabled!==false;$('editTokenImageConcurrency').value=token.image_concurrency||'-1';$('editTokenVideoConcurrency').value=token.video_concurrency||'-1';$('editModal').classList.remove('hidden')},
+        closeAddModal=()=>{$('addModal').classList.add('hidden');$('addTokenGoogleCookies').value='';$('addTokenLoginAccount').value='';$('addTokenRemark').value='';$('addTokenProjectId').value='';$('addTokenProjectName').value='';$('addTokenCaptchaProxyUrl').value='';$('addTokenProxyUrl').value='';$('addTokenAutoRefreshEnabled').checked=true;$('addTokenRefreshIntervalMinutes').value='120';$('addTokenImageEnabled').checked=true;$('addTokenVideoEnabled').checked=true;$('addTokenImageConcurrency').value='';$('addTokenVideoConcurrency').value=''},
+        openEditModal=(id)=>{const token=allTokens.find(t=>t.id===id);if(!token)return showToast('账号不存在','error');$('editTokenId').value=token.id;$('editTokenGoogleCookies').value=token.google_cookies||'';$('editTokenLoginAccount').value=token.login_account||token.email||'';$('editTokenRemark').value=token.remark||'';$('editTokenProjectId').value=token.current_project_id||'';$('editTokenProjectName').value=token.current_project_name||'';$('editTokenCaptchaProxyUrl').value=token.captcha_proxy_url||'';$('editTokenProxyUrl').value=token.proxy_url||'';$('editTokenAutoRefreshEnabled').checked=token.auto_refresh_enabled!==false;$('editTokenRefreshIntervalMinutes').value=token.refresh_interval_minutes||120;$('editTokenImageEnabled').checked=token.image_enabled!==false;$('editTokenVideoEnabled').checked=token.video_enabled!==false;$('editTokenImageConcurrency').value=concurrencyField(token.image_concurrency);$('editTokenVideoConcurrency').value=concurrencyField(token.video_concurrency);$('editModal').classList.remove('hidden')},
         closeEditModal=()=>{$('editModal').classList.add('hidden');$('editTokenId').value='';$('editTokenGoogleCookies').value='';$('editTokenLoginAccount').value='';$('editTokenRemark').value='';$('editTokenProjectId').value='';$('editTokenProjectName').value='';$('editTokenCaptchaProxyUrl').value='';$('editTokenProxyUrl').value='';$('editTokenAutoRefreshEnabled').checked=true;$('editTokenRefreshIntervalMinutes').value='120';$('editTokenImageEnabled').checked=true;$('editTokenVideoEnabled').checked=true;$('editTokenImageConcurrency').value='';$('editTokenVideoConcurrency').value=''},
-        submitEditToken=async()=>{const id=parseInt($('editTokenId').value),googleCookies=$('editTokenGoogleCookies').value.trim(),loginAccount=$('editTokenLoginAccount').value.trim().toLowerCase(),remark=$('editTokenRemark').value.trim(),projectId=$('editTokenProjectId').value.trim(),projectName=$('editTokenProjectName').value.trim(),captchaProxyUrl=$('editTokenCaptchaProxyUrl').value.trim(),proxyUrl=$('editTokenProxyUrl').value.trim(),autoRefreshEnabled=$('editTokenAutoRefreshEnabled').checked,refreshIntervalMinutes=parseInt($('editTokenRefreshIntervalMinutes').value)||120,imageEnabled=$('editTokenImageEnabled').checked,videoEnabled=$('editTokenVideoEnabled').checked,imageConcurrency=$('editTokenImageConcurrency').value?parseInt($('editTokenImageConcurrency').value):null,videoConcurrency=$('editTokenVideoConcurrency').value?parseInt($('editTokenVideoConcurrency').value):null;if(!id)return showToast('账号 ID 无效','error');if(!googleCookies)return showToast('请输入 Google Cookies','error');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginAccount))return showToast('请输入有效的 Google 账号邮箱','error');const btn=$('editTokenBtn'),btnText=$('editTokenBtnText'),btnSpinner=$('editTokenBtnSpinner');btn.disabled=true;btnText.textContent='保存中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest(`/api/tokens/${id}`,{method:'PUT',body:JSON.stringify({remark:remark||null,project_id:projectId||null,project_name:projectName||null,captcha_proxy_url:captchaProxyUrl,protocol_mode:'protocol',google_cookies:googleCookies,login_account:loginAccount,proxy_url:proxyUrl,auto_refresh_enabled:autoRefreshEnabled,refresh_interval_minutes:refreshIntervalMinutes,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r)return;const d=await r.json();if(d.success){closeEditModal();await refreshTokens();showToast('账号更新成功','success')}else{showToast('更新失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden')}},
-        submitAddToken=async()=>{const googleCookies=$('addTokenGoogleCookies').value.trim(),loginAccount=$('addTokenLoginAccount').value.trim().toLowerCase(),remark=$('addTokenRemark').value.trim(),projectId=$('addTokenProjectId').value.trim(),projectName=$('addTokenProjectName').value.trim(),captchaProxyUrl=$('addTokenCaptchaProxyUrl').value.trim(),proxyUrl=$('addTokenProxyUrl').value.trim(),autoRefreshEnabled=$('addTokenAutoRefreshEnabled').checked,refreshIntervalMinutes=parseInt($('addTokenRefreshIntervalMinutes').value)||120,imageEnabled=$('addTokenImageEnabled').checked,videoEnabled=$('addTokenVideoEnabled').checked,imageConcurrency=parseInt($('addTokenImageConcurrency').value)||(-1),videoConcurrency=parseInt($('addTokenVideoConcurrency').value)||(-1);if(!googleCookies)return showToast('请输入 Google Cookies','error');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginAccount))return showToast('请输入有效的 Google 账号邮箱','error');const btn=$('addTokenBtn'),btnText=$('addTokenBtnText'),btnSpinner=$('addTokenBtnSpinner');btn.disabled=true;btnText.textContent='添加中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens',{method:'POST',body:JSON.stringify({remark:remark||null,project_id:projectId||null,project_name:projectName||null,captcha_proxy_url:captchaProxyUrl,protocol_mode:'protocol',google_cookies:googleCookies,login_account:loginAccount,proxy_url:proxyUrl,auto_refresh_enabled:autoRefreshEnabled,refresh_interval_minutes:refreshIntervalMinutes,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r)return;const d=await r.json();if(d.success){closeAddModal();await refreshTokens();showToast('账号添加成功','success')}else{showToast('添加失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('添加失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden')}},
+        submitEditToken=async()=>{const id=parseInt($('editTokenId').value),googleCookies=$('editTokenGoogleCookies').value.trim(),loginAccount=$('editTokenLoginAccount').value.trim().toLowerCase(),remark=$('editTokenRemark').value.trim(),projectId=$('editTokenProjectId').value.trim(),projectName=$('editTokenProjectName').value.trim(),captchaProxyUrl=$('editTokenCaptchaProxyUrl').value.trim(),proxyUrl=$('editTokenProxyUrl').value.trim(),autoRefreshEnabled=$('editTokenAutoRefreshEnabled').checked,refreshIntervalMinutes=parseInt($('editTokenRefreshIntervalMinutes').value)||120,imageEnabled=$('editTokenImageEnabled').checked,videoEnabled=$('editTokenVideoEnabled').checked,imageConcurrency=parseConcurrency($('editTokenImageConcurrency').value),videoConcurrency=parseConcurrency($('editTokenVideoConcurrency').value);if(!id)return showToast('账号 ID 无效','error');if(!googleCookies)return showToast('请输入 Google Cookies','error');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginAccount))return showToast('请输入有效的 Google 账号邮箱','error');const btn=$('editTokenBtn'),btnText=$('editTokenBtnText'),btnSpinner=$('editTokenBtnSpinner');btn.disabled=true;btnText.textContent='保存中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest(`/api/tokens/${id}`,{method:'PUT',body:JSON.stringify({remark:remark||null,project_id:projectId||null,project_name:projectName||null,captcha_proxy_url:captchaProxyUrl,protocol_mode:'protocol',google_cookies:googleCookies,login_account:loginAccount,proxy_url:proxyUrl,auto_refresh_enabled:autoRefreshEnabled,refresh_interval_minutes:refreshIntervalMinutes,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r)return;const d=await r.json();if(d.success){closeEditModal();await refreshTokens();showToast('账号更新成功','success')}else{showToast('更新失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='保存';btnSpinner.classList.add('hidden')}},
+        submitAddToken=async()=>{const googleCookies=$('addTokenGoogleCookies').value.trim(),loginAccount=$('addTokenLoginAccount').value.trim().toLowerCase(),remark=$('addTokenRemark').value.trim(),projectId=$('addTokenProjectId').value.trim(),projectName=$('addTokenProjectName').value.trim(),captchaProxyUrl=$('addTokenCaptchaProxyUrl').value.trim(),proxyUrl=$('addTokenProxyUrl').value.trim(),autoRefreshEnabled=$('addTokenAutoRefreshEnabled').checked,refreshIntervalMinutes=parseInt($('addTokenRefreshIntervalMinutes').value)||120,imageEnabled=$('addTokenImageEnabled').checked,videoEnabled=$('addTokenVideoEnabled').checked,imageConcurrency=parseConcurrency($('addTokenImageConcurrency').value),videoConcurrency=parseConcurrency($('addTokenVideoConcurrency').value);if(!googleCookies)return showToast('请输入 Google Cookies','error');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginAccount))return showToast('请输入有效的 Google 账号邮箱','error');const btn=$('addTokenBtn'),btnText=$('addTokenBtnText'),btnSpinner=$('addTokenBtnSpinner');btn.disabled=true;btnText.textContent='添加中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens',{method:'POST',body:JSON.stringify({remark:remark||null,project_id:projectId||null,project_name:projectName||null,captcha_proxy_url:captchaProxyUrl,protocol_mode:'protocol',google_cookies:googleCookies,login_account:loginAccount,proxy_url:proxyUrl,auto_refresh_enabled:autoRefreshEnabled,refresh_interval_minutes:refreshIntervalMinutes,image_enabled:imageEnabled,video_enabled:videoEnabled,image_concurrency:imageConcurrency,video_concurrency:videoConcurrency})});if(!r)return;const d=await r.json();if(d.success){closeAddModal();await refreshTokens();showToast('账号添加成功','success')}else{showToast('添加失败: '+(d.detail||d.message||'未知错误'),'error')}}catch(e){showToast('添加失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='添加';btnSpinner.classList.add('hidden')}},
         testToken=async(id)=>{try{showToast('正在测试Token...','info');const r=await apiRequest(`/api/tokens/${id}/test`,{method:'POST'});if(!r)return;const d=await r.json();if(d.success&&d.status==='success'){let msg=`Token有效！用户: ${d.email||'未知'}`;if(d.sora2_supported){const remaining=d.sora2_total_count-d.sora2_redeemed_count;msg+=`\nSora2: 支持 (${remaining}/${d.sora2_total_count})`;if(d.sora2_remaining_count!==undefined){msg+=`\n可用次数: ${d.sora2_remaining_count}`}}showToast(msg,'success');await refreshTokens()}else{showToast(`Token无效: ${d.message||'未知错误'}`,'error')}}catch(e){showToast('测试失败: '+e.message,'error')}},
-        toggleToken=async(id,isActive)=>{const action=isActive?'disable':'enable';try{const r=await apiRequest(`/api/tokens/${id}/${action}`,{method:'POST'});if(!r)return;const d=await r.json();d.success?(await refreshTokens(),showToast(isActive?'Token已禁用':'Token已启用','success')):showToast('操作失败','error')}catch(e){showToast('操作失败: '+e.message,'error')}},
+        toggleToken=async(id,isActive)=>{const action=isActive?'disable':'enable';try{const r=await apiRequest(`/api/tokens/${id}/${action}`,{method:'POST'});if(!r)return;const d=await r.json();d.success?(await refreshTokens(),showToast(isActive?'账号已停用':'账号已启用','success')):showToast('操作失败','error')}catch(e){showToast('操作失败: '+e.message,'error')}},
         toggleTokenStatus=async(id,active)=>{try{const r=await apiRequest(`/api/tokens/${id}/status`,{method:'PUT',body:JSON.stringify({is_active:active})});if(!r)return;const d=await r.json();d.success?(await refreshTokens(),showToast('状态更新成功','success')):showToast('更新失败','error')}catch(e){showToast('更新失败: '+e.message,'error')}},
-        deleteToken=async(id,skipConfirm=false)=>{if(!skipConfirm&&!confirm('确定要删除这个Token吗?'))return;try{const r=await apiRequest(`/api/tokens/${id}`,{method:'DELETE'});if(!r)return;const d=await r.json();if(d.success){await refreshTokens();if(!skipConfirm)showToast('删除成功','success');return true}else{if(!skipConfirm)showToast('删除失败','error');return false}}catch(e){if(!skipConfirm)showToast('删除失败: '+e.message,'error');return false}},
+        deleteToken=async(id,skipConfirm=false)=>{if(!skipConfirm){const token=allTokens.find(item=>item.id===id);const name=(token&&(token.login_account||token.email))||'这个账号';if(!confirm(`确定删除账号 ${name} 吗？删除后不能用它生成。`))return}try{const r=await apiRequest(`/api/tokens/${id}`,{method:'DELETE'});if(!r)return;const d=await r.json();if(d.success){await refreshTokens();if(!skipConfirm)showToast('删除成功','success');return true}else{if(!skipConfirm)showToast('删除失败','error');return false}}catch(e){if(!skipConfirm)showToast('删除失败: '+e.message,'error');return false}},
         copySora2Code=async(code)=>{if(!code){showToast('没有可复制的邀请码','error');return}try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(code);showToast(`邀请码已复制: ${code}`,'success')}else{const textarea=document.createElement('textarea');textarea.value=code;textarea.style.position='fixed';textarea.style.opacity='0';document.body.appendChild(textarea);textarea.select();const success=document.execCommand('copy');document.body.removeChild(textarea);if(success){showToast(`邀请码已复制: ${code}`,'success')}else{showToast('复制失败: 浏览器不支持','error')}}}catch(e){showToast('复制失败: '+e.message,'error')}},
         copyProjectId=async(projectId)=>{if(!projectId){showToast('没有可复制的Project ID','error');return}try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(projectId);showToast(`Project ID已复制: ${projectId}`,'success')}else{const textarea=document.createElement('textarea');textarea.value=projectId;textarea.style.position='fixed';textarea.style.opacity='0';document.body.appendChild(textarea);textarea.select();const success=document.execCommand('copy');document.body.removeChild(textarea);if(success){showToast(`Project ID已复制: ${projectId}`,'success')}else{showToast('复制失败: 浏览器不支持','error')}}}catch(e){showToast('复制失败: '+e.message,'error')}},
         openSora2Modal=(id)=>{$('sora2TokenId').value=id;$('sora2InviteCode').value='';$('sora2Modal').classList.remove('hidden')},
         closeSora2Modal=()=>{$('sora2Modal').classList.add('hidden');$('sora2TokenId').value='';$('sora2InviteCode').value=''},
         openImportModal=()=>{$('importModal').classList.remove('hidden');$('importFile').value=''},
         closeImportModal=()=>{$('importModal').classList.add('hidden');$('importFile').value=''},
-        exportTokens=()=>{const exportable=allTokens.filter(t=>(t.login_account||t.email)&&t.google_cookies);if(exportable.length===0){showToast('没有可导出的新版账号','error');return}const exportData=exportable.map(t=>({login_account:(t.login_account||t.email).toLowerCase(),google_cookies:t.google_cookies,remark:t.remark||'',project_id:t.current_project_id||null,project_name:t.current_project_name||null,is_active:t.is_active!==false,captcha_proxy_url:t.captcha_proxy_url||'',extension_route_key:t.extension_route_key||'',image_enabled:t.image_enabled!==false,video_enabled:t.video_enabled!==false,image_concurrency:t.image_concurrency??(-1),video_concurrency:t.video_concurrency??(-1),protocol_mode:'protocol',proxy_url:t.proxy_url||'',auto_refresh_enabled:t.auto_refresh_enabled!==false,refresh_interval_minutes:t.refresh_interval_minutes||120}));const dataStr=JSON.stringify(exportData,null,2),dataBlob=new Blob([dataStr],{type:'application/json'}),url=URL.createObjectURL(dataBlob),link=document.createElement('a');link.href=url;link.download=`flow2api_accounts_${new Date().toISOString().split('T')[0]}.json`;document.body.appendChild(link);link.click();document.body.removeChild(link);URL.revokeObjectURL(url);const skipped=allTokens.length-exportable.length;showToast(`已导出 ${exportable.length} 个账号${skipped?`，跳过 ${skipped} 个缺少新版 Cookie 的旧账号`:''}`,'success')},
+        exportTokens=()=>{const exportable=allTokens.filter(t=>(t.login_account||t.email)&&t.google_cookies);if(exportable.length===0){showToast('没有可导出的账号','error');return}if(!confirm('导出的文件里有 Google 登录 Cookie。只保存在你信任的设备上。继续导出吗？'))return;const exportData=exportable.map(t=>({login_account:(t.login_account||t.email).toLowerCase(),google_cookies:t.google_cookies,remark:t.remark||'',project_id:t.current_project_id||null,project_name:t.current_project_name||null,is_active:t.is_active!==false,captcha_proxy_url:t.captcha_proxy_url||'',extension_route_key:t.extension_route_key||'',image_enabled:t.image_enabled!==false,video_enabled:t.video_enabled!==false,image_concurrency:t.image_concurrency??(-1),video_concurrency:t.video_concurrency??(-1),protocol_mode:'protocol',proxy_url:t.proxy_url||'',auto_refresh_enabled:t.auto_refresh_enabled!==false,refresh_interval_minutes:t.refresh_interval_minutes||120}));const dataStr=JSON.stringify(exportData,null,2),dataBlob=new Blob([dataStr],{type:'application/json'}),url=URL.createObjectURL(dataBlob),link=document.createElement('a');link.href=url;link.download=`flow2api_accounts_${new Date().toISOString().split('T')[0]}.json`;document.body.appendChild(link);link.click();document.body.removeChild(link);URL.revokeObjectURL(url);const skipped=allTokens.length-exportable.length;showToast(`已导出 ${exportable.length} 个账号${skipped?`，跳过 ${skipped} 个缺少新版 Cookie 的旧账号`:''}`,'success')},
         submitImportTokens=async()=>{const fileInput=$('importFile');if(!fileInput.files||fileInput.files.length===0)return showToast('请选择文件','error');const file=fileInput.files[0];if(!file.name.toLowerCase().endsWith('.json'))return showToast('请选择 JSON 文件','error');if(file.size>5*1024*1024)return showToast('导入文件不能超过 5MB','error');try{const fileContent=await file.text(),importData=JSON.parse(fileContent);if(!Array.isArray(importData))return showToast('JSON 格式错误：根节点必须是数组','error');if(importData.length===0)return showToast('JSON 文件为空','error');if(importData.length>100)return showToast('单次最多导入 100 个账号','error');const invalidIndex=importData.findIndex(item=>!item||typeof item!=='object'||Array.isArray(item)||typeof item.google_cookies!=='string'||!item.google_cookies.trim()||typeof item.login_account!=='string'||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.login_account.trim())||(item.protocol_mode&&item.protocol_mode!=='protocol'));if(invalidIndex>=0)return showToast(`第 ${invalidIndex+1} 项缺少有效的 login_account 或 google_cookies`,'error');const legacyIndex=importData.findIndex(item=>'access_token'in item||'session_token'in item||'login_password'in item);if(legacyIndex>=0)return showToast(`第 ${legacyIndex+1} 项仍包含旧版凭证字段，请使用新版导出文件`,'error');const normalized=importData.map(item=>({...item,login_account:item.login_account.trim().toLowerCase(),google_cookies:item.google_cookies.trim(),protocol_mode:'protocol'}));const btn=$('importBtn'),btnText=$('importBtnText'),btnSpinner=$('importBtnSpinner');btn.disabled=true;btnText.textContent='导入中...';btnSpinner.classList.remove('hidden');try{const r=await apiRequest('/api/tokens/import',{method:'POST',body:JSON.stringify({tokens:normalized})});if(!r)return;const d=await r.json(),errorList=Array.isArray(d.errors)?d.errors:[];if(d.success){closeImportModal();await refreshTokens();let message=`导入完成：新增 ${d.added||0}，更新 ${d.updated||0}`;if(errorList.length)message+=`，失败 ${errorList.length}\n${errorList.slice(0,3).join('\n')}`;showToast(message,errorList.length?'error':'success')}else{const detail=Array.isArray(d.detail)?d.detail.map(item=>item.msg||String(item)).join('；'):(d.detail||d.message||errorList.join('\n')||'未知错误');showToast('导入失败: '+detail,'error')}}catch(e){showToast('导入失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='导入';btnSpinner.classList.add('hidden')}}catch(e){showToast('文件解析失败: '+e.message,'error')}},
         submitSora2Activate=async()=>{const tokenId=parseInt($('sora2TokenId').value),inviteCode=$('sora2InviteCode').value.trim();if(!tokenId)return showToast('Token ID无效','error');if(!inviteCode)return showToast('请输入邀请码','error');if(inviteCode.length!==6)return showToast('邀请码必须是6位','error');const btn=$('sora2ActivateBtn'),btnText=$('sora2ActivateBtnText'),btnSpinner=$('sora2ActivateBtnSpinner');btn.disabled=true;btnText.textContent='激活中...';btnSpinner.classList.remove('hidden');try{showToast('正在激活Sora2...','info');const r=await apiRequest(`/api/tokens/${tokenId}/sora2/activate?invite_code=${inviteCode}`,{method:'POST'});if(!r){btn.disabled=false;btnText.textContent='激活';btnSpinner.classList.add('hidden');return}const d=await r.json();if(d.success){closeSora2Modal();await refreshTokens();if(d.already_accepted){showToast('Sora2已激活（之前已接受）','success')}else{showToast(`Sora2激活成功！邀请码: ${d.invite_code||'无'}`,'success')}}else{showToast('激活失败: '+(d.message||'未知错误'),'error')}}catch(e){showToast('激活失败: '+e.message,'error')}finally{btn.disabled=false;btnText.textContent='激活';btnSpinner.classList.add('hidden')}},
         loadAdminConfig=async()=>{try{const r=await apiRequest('/api/admin/config');if(!r)return;const d=await r.json();$('cfgErrorBan').value=d.error_ban_threshold||3;$('cfgAdminUsername').value=d.admin_username||'admin';$('cfgCurrentAPIKey').value=d.api_key||'';$('cfgDebugEnabled').checked=d.debug_enabled||false}catch(e){console.error('加载配置失败:',e)}},
         saveAdminConfig=async()=>{try{const r=await apiRequest('/api/admin/config',{method:'POST',body:JSON.stringify({error_ban_threshold:parseInt($('cfgErrorBan').value)||3})});if(!r)return;const d=await r.json();d.success?showToast('配置保存成功','success'):showToast('保存失败','error')}catch(e){showToast('保存失败: '+e.message,'error')}},
-        updateAdminPassword=async()=>{const username=$('cfgAdminUsername').value.trim(),oldPwd=$('cfgOldPassword').value.trim(),newPwd=$('cfgNewPassword').value.trim();if(!oldPwd||!newPwd)return showToast('请输入旧密码和新密码','error');if(newPwd.length<4)return showToast('新密码至少4个字符','error');try{const r=await apiRequest('/api/admin/password',{method:'POST',body:JSON.stringify({username:username||undefined,old_password:oldPwd,new_password:newPwd})});if(!r)return;const d=await r.json();if(d.success){showToast('密码修改成功，请重新登录','success');setTimeout(()=>{location.href='/login'},2000)}else{showToast('修改失败: '+(d.detail||'未知错误'),'error')}}catch(e){showToast('修改失败: '+e.message,'error')}},
-        updateAPIKey=async()=>{const newKey=$('cfgNewAPIKey').value.trim();if(!newKey)return showToast('请输入新的 API Key','error');if(newKey.length<6)return showToast('API Key 至少6个字符','error');if(!confirm('确定要更新 API Key 吗？更新后需要通知所有客户端使用新密钥。'))return;try{const r=await apiRequest('/api/admin/apikey',{method:'POST',body:JSON.stringify({new_api_key:newKey})});if(!r)return;const d=await r.json();if(d.success){showToast('API Key 更新成功','success');$('cfgCurrentAPIKey').value=newKey;$('cfgNewAPIKey').value=''}else{showToast('更新失败: '+(d.detail||'未知错误'),'error')}}catch(e){showToast('更新失败: '+e.message,'error')}},
+        updateAdminPassword=async()=>{const oldPwd=$('cfgOldPassword').value.trim(),newPwd=$('cfgNewPassword').value.trim(),again=$('cfgNewPassword2').value.trim();if(!oldPwd||!newPwd)return showToast('请输入当前密码和新密码','error');if(newPwd!==again)return showToast('两次输入的新密码不一致','error');if(newPwd.length<4)return showToast('新密码至少 4 个字符','error');if(!confirm('修改密码后需要重新登录。继续吗？'))return;try{const r=await apiRequest('/api/admin/password',{method:'POST',body:JSON.stringify({old_password:oldPwd,new_password:newPwd})});if(!r)return;const d=await r.json();if(d.success){showToast('密码已修改，请重新登录','success');setTimeout(()=>{location.href='/login'},1500)}else{showToast(d.detail||'修改失败','error')}}catch(e){showToast('修改失败: '+e.message,'error')}},
+        updateAPIKey=async()=>{const newKey=$('cfgNewAPIKey').value.trim();if(!newKey)return showToast('请输入新的调用密钥','error');if(newKey.length<16)return showToast('调用密钥至少 16 个字符','error');if(!confirm('更换后，已经配好的工具要改成新密钥。继续吗？'))return;try{const r=await apiRequest('/api/admin/apikey',{method:'POST',body:JSON.stringify({new_api_key:newKey})});if(!r)return;const d=await r.json();if(d.success){showToast('调用密钥已更换','success');$('cfgCurrentAPIKey').value=newKey;$('cfgNewAPIKey').value=''}else{showToast(d.detail||'更换失败','error')}}catch(e){showToast('更换失败: '+e.message,'error')}},
         toggleDebugMode=async()=>{const enabled=$('cfgDebugEnabled').checked;try{const r=await apiRequest('/api/admin/debug',{method:'POST',body:JSON.stringify({enabled:enabled})});if(!r)return;const d=await r.json();if(d.success){showToast(enabled?'调试模式已开启':'调试模式已关闭','success')}else{showToast('操作失败: '+(d.detail||'未知错误'),'error');$('cfgDebugEnabled').checked=!enabled}}catch(e){showToast('操作失败: '+e.message,'error');$('cfgDebugEnabled').checked=!enabled}},
         loadProxyConfig=async()=>{try{const r=await apiRequest('/api/proxy/config');if(!r)return;const d=await r.json();$('cfgProxyEnabled').checked=d.proxy_enabled||false;$('cfgProxyUrl').value=d.proxy_url||'';$('cfgMediaProxyEnabled').checked=d.media_proxy_enabled||false;$('cfgMediaProxyUrl').value=d.media_proxy_url||'';toggleMediaProxyInput()}catch(e){console.error('加载代理配置失败:',e)}},
         saveProxyConfig=async()=>{try{const r=await apiRequest('/api/proxy/config',{method:'POST',body:JSON.stringify({proxy_enabled:$('cfgProxyEnabled').checked,proxy_url:$('cfgProxyUrl').value.trim(),media_proxy_enabled:$('cfgMediaProxyEnabled').checked,media_proxy_url:$('cfgMediaProxyUrl').value.trim()})});if(!r)return;const d=await r.json();d.success?showToast('代理配置保存成功','success'):showToast('保存失败','error')}catch(e){showToast('保存失败: '+e.message,'error')}},
@@ -973,19 +953,19 @@
         loadPluginConfig=async()=>{try{const r=await apiRequest('/api/plugin/config');if(!r)return;const d=await r.json();if(d.success&&d.config){$('cfgPluginConnectionUrl').value=d.config.connection_url||'';$('cfgPluginConnectionToken').value=d.config.connection_token||'';$('cfgAutoEnableOnUpdate').checked=d.config.auto_enable_on_update||false}}catch(e){console.error('加载插件配置失败:',e);showToast('加载插件配置失败: '+e.message,'error')}},
         savePluginConfig=async()=>{const token=$('cfgPluginConnectionToken').value.trim();const autoEnable=$('cfgAutoEnableOnUpdate').checked;try{const r=await apiRequest('/api/plugin/config',{method:'POST',body:JSON.stringify({connection_token:token,auto_enable_on_update:autoEnable})});if(!r)return;const d=await r.json();if(d.success){showToast('插件配置保存成功','success');await loadPluginConfig()}else{showToast(d.message||'保存失败','error')}}catch(e){showToast('保存失败: '+e.message,'error')}},
         copyConnectionUrl=()=>{const url=$('cfgPluginConnectionUrl').value;if(!url){showToast('连接接口为空','error');return}navigator.clipboard.writeText(url).then(()=>showToast('连接接口已复制','success')).catch(()=>showToast('复制失败','error'))},
-        copyConnectionToken=()=>{const token=$('cfgPluginConnectionToken').value;if(!token){showToast('连接Token为空','error');return}navigator.clipboard.writeText(token).then(()=>showToast('连接Token已复制','success')).catch(()=>showToast('复制失败','error'))},
-        generateRandomToken=()=>{const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';let token='';for(let i=0;i<32;i++){token+=chars.charAt(Math.floor(Math.random()*chars.length))}$('cfgPluginConnectionToken').value=token;showToast('随机Token已生成','success')},
-        toggleATAutoRefresh=async()=>{try{const enabled=$('atAutoRefreshToggle').checked;const r=await apiRequest('/api/token-refresh/enabled',{method:'POST',body:JSON.stringify({enabled:enabled})});if(!r){$('atAutoRefreshToggle').checked=!enabled;return}const d=await r.json();if(d.success){showToast(enabled?'AT自动刷新已启用':'AT自动刷新已禁用','success')}else{showToast('操作失败: '+(d.detail||'未知错误'),'error');$('atAutoRefreshToggle').checked=!enabled}}catch(e){showToast('操作失败: '+e.message,'error');$('atAutoRefreshToggle').checked=!enabled}},
+        copyConnectionToken=()=>{const token=$('cfgPluginConnectionToken').value;if(!token){showToast('还没有口令','error');return}navigator.clipboard.writeText(token).then(()=>showToast('口令已复制','success')).catch(()=>showToast('复制失败','error'))},
+        generateRandomToken=()=>{const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';let token='';for(let i=0;i<32;i++){token+=chars.charAt(Math.floor(Math.random()*chars.length))}$('cfgPluginConnectionToken').value=token;showToast('已生成口令','success')},
+        toggleATAutoRefresh=async()=>{try{const enabled=$('atAutoRefreshToggle').checked;const r=await apiRequest('/api/token-refresh/enabled',{method:'POST',body:JSON.stringify({enabled:enabled})});if(!r){$('atAutoRefreshToggle').checked=!enabled;return}const d=await r.json();if(d.success){showToast(enabled?'已打开定时检查':'已关闭定时检查','success')}else{showToast('操作失败: '+(d.detail||'未知错误'),'error');$('atAutoRefreshToggle').checked=!enabled}}catch(e){showToast('操作失败: '+e.message,'error');$('atAutoRefreshToggle').checked=!enabled}},
         loadATAutoRefreshConfig=async()=>{try{const r=await apiRequest('/api/token-refresh/config');if(!r)return;const d=await r.json();if(d.success&&d.config){$('atAutoRefreshToggle').checked=d.config.at_auto_refresh_enabled||false}else{console.error('AT自动刷新配置数据格式错误:',d)}}catch(e){console.error('加载AT自动刷新配置失败:',e)}},
         formatLogStatus=l=>{const statusText=(l.status_text||'').trim();if(statusText){const map={started:'\u5df2\u542f\u52a8',token_selected:'\u5df2\u9009\u4e2d\u8d26\u53f7',token_ready:'\u51c6\u5907\u751f\u6210\u73af\u5883',project_ready:'\u9879\u76ee\u5df2\u5c31\u7eea',uploading_images:'\u4e0a\u4f20\u53c2\u8003\u56fe\u4e2d',solving_image_captcha:'\u56fe\u7247\u6253\u7801\u9a8c\u8bc1\u4e2d',submitting_image:'\u56fe\u7247\u63d0\u4ea4\u4e2d',image_generated:'\u56fe\u7247\u751f\u6210\u5b8c\u6210',preparing_video:'\u51c6\u5907\u89c6\u9891\u4efb\u52a1',submitting_video:'\u89c6\u9891\u63d0\u4ea4\u4e2d',video_submitted:'\u89c6\u9891\u4efb\u52a1\u5df2\u63d0\u4ea4',video_polling:'\u89c6\u9891\u751f\u6210\u4e2d',caching_image:'\u7f13\u5b58\u56fe\u7247\u4e2d',caching_video:'\u7f13\u5b58\u89c6\u9891\u4e2d',completed:'\u5df2\u5b8c\u6210',failed:'\u5931\u8d25',processing:'\u5904\u7406\u4e2d',upsampling_2k:'\u6b63\u5728\u653e\u5927\u52302K',upsampling_4k:'\u6b63\u5728\u653e\u5927\u52304K',upsampling_1080p:'\u6b63\u5728\u653e\u5927\u52301080P'};return map[statusText]||statusText}if(l.status_code===102)return'\u5904\u7406\u4e2d';if(l.status_code===200)return'\u5df2\u5b8c\u6210';if(l.status_code&&l.status_code>=400)return'\u5931\u8d25';return'-'},
         formatLogStatusClass=l=>{const statusText=formatLogStatus(l);if(statusText==='\u5904\u7406\u4e2d')return'bg-amber-50 text-amber-700';if(statusText==='\u5df2\u5b8c\u6210')return'bg-green-50 text-green-700';if(statusText==='\u5931\u8d25')return'bg-red-50 text-red-700';return'bg-gray-100 text-gray-700'},
         formatLogProgress=l=>{if(l.progress===null||l.progress===undefined||l.progress==='')return'-';const progress=Number(l.progress);return Number.isFinite(progress)?`${Math.max(0,Math.min(100,progress))}%`:'-'},
-        getLogOperationLabel=l=>{const operation=String(l&&l.operation||'').trim();if(operation==='generate_image')return'图片';if(operation==='generate_video')return'视频';return''},
+        getLogOperationLabel=l=>{const operation=String(l&&l.operation||'').trim();if(operation==='generate_image')return'图片';if(operation==='generate_video'||operation==='extend_video')return'视频';return''},
         formatLogOutcome=l=>{const statusCode=Number(l&&l.status_code);if(statusCode===200){const operationLabel=getLogOperationLabel(l);return operationLabel?`${operationLabel}结果已返回`:'已返回结果'}if(statusCode===102)return'处理中';const errorSummary=extractLogErrorSummary(l);if(errorSummary)return truncateLogText(errorSummary,96);return statusCode>=400?'请求失败':'-'},
         formatLogOutcomeClass=l=>{if((l.status_code||0)>=400)return'text-red-600';if(l.status_code===200)return'text-green-700';if(l.status_code===102)return'text-amber-700';return'text-muted-foreground'},
-        startLogsAutoRefresh=()=>{stopLogsAutoRefresh()},
+        startLogsAutoRefresh=()=>{stopLogsAutoRefresh();window.logsAutoRefreshTimer=setInterval(()=>{const panel=$('panelLogs');if(!panel||panel.classList.contains('hidden'))return;loadLogs({silent:true})},5000)},
         stopLogsAutoRefresh=()=>{if(window.logsAutoRefreshTimer){clearInterval(window.logsAutoRefreshTimer);window.logsAutoRefreshTimer=null}},
-        loadLogs=async(opts={})=>{const silent=!!opts.silent;try{const r=await apiRequest('/api/logs?limit=100');if(!r)return;const logs=await r.json();window.allLogs=logs;window.logDetailCache=window.logDetailCache||Object.create(null);window.logListMeta=Object.create(null);logs.forEach(l=>window.logListMeta[l.id]={updated_at:l.updated_at,created_at:l.created_at,status_code:l.status_code,progress:l.progress,status_text:l.status_text,error_summary:l.error_summary||''});Object.keys(window.logDetailCache).forEach(key=>{const meta=window.logListMeta[key];const cached=window.logDetailCache[key];if(!meta||!cached||cached.updated_at!==meta.updated_at)delete window.logDetailCache[key]});const tb=$('logsTableBody');if(!logs.length){tb.innerHTML='<tr><td colspan="9" class="py-8 px-3 text-center text-sm text-muted-foreground">\u6682\u65e0\u65e5\u5fd7</td></tr>';return}tb.innerHTML=logs.map(l=>{const statusText=formatLogStatus(l),progressText=formatLogProgress(l),outcomeText=formatLogOutcome(l),outcomePreview=truncateLogText(outcomeText,96),statusCodeClass=l.status_code===102?'bg-amber-50 text-amber-700':(l.status_code===200?'bg-green-50 text-green-700':'bg-red-50 text-red-700');return`<tr><td class="py-2.5 px-3">${escapeLogHtml(l.operation||'-')}</td><td class="py-2.5 px-3"><span class="text-xs ${l.token_email?'text-blue-600':'text-muted-foreground'}">${escapeLogHtml(l.token_email||'\u672a\u77e5')}</span></td><td class="py-2.5 px-3"><span class="inline-flex items-center rounded px-2 py-0.5 text-xs ${formatLogStatusClass(l)}">${escapeLogHtml(statusText)}</span></td><td class="py-2.5 px-3 text-xs">${escapeLogHtml(progressText)}</td><td class="py-2.5 px-3"><span class="inline-flex items-center rounded px-2 py-0.5 text-xs ${statusCodeClass}">${escapeLogHtml(l.status_code??'-')}</span></td><td class="py-2.5 px-3 align-top"><div class="w-[17rem] max-w-[17rem] text-xs leading-5 whitespace-pre-wrap break-words line-clamp-2 ${formatLogOutcomeClass(l)}" title="${escapeLogHtml(outcomeText)}">${escapeLogHtml(outcomePreview)}</div></td><td class="py-2.5 px-3">${Number(l.duration||0).toFixed(2)}</td><td class="py-2.5 px-3 text-xs text-muted-foreground">${l.created_at?new Date(l.created_at).toLocaleString('zh-CN'):'-'}</td><td class="py-2.5 px-3"><button onclick="showLogDetail(${l.id})" class="inline-flex items-center justify-center rounded-md hover:bg-blue-50 hover:text-blue-700 h-7 px-2 text-xs">&#35814;&#24773;</button></td></tr>`}).join('');if(window.activeLogDetailId&&window.logListMeta[window.activeLogDetailId])await showLogDetail(window.activeLogDetailId,{silent:true})}catch(e){console.error('load logs failed:',e);if(!silent)showToast('\u52a0\u8f7d\u65e5\u5fd7\u5931\u8d25: '+e.message,'error')}},
+        loadLogs=async(opts={})=>{const silent=!!opts.silent;try{const r=await apiRequest('/api/logs?limit=500');if(!r)return;const logs=await r.json();window.allLogs=Array.isArray(logs)?logs:[];window.logDetailCache=window.logDetailCache||Object.create(null);window.logListMeta=Object.create(null);window.allLogs.forEach(l=>window.logListMeta[l.id]={updated_at:l.updated_at,created_at:l.created_at,status_code:l.status_code,progress:l.progress,status_text:l.status_text,error_summary:l.error_summary||''});Object.keys(window.logDetailCache).forEach(key=>{const meta=window.logListMeta[key];const cached=window.logDetailCache[key];if(!meta||!cached||cached.updated_at!==meta.updated_at)delete window.logDetailCache[key]});renderLogRows();if(window.activeLogDetailId&&window.logListMeta[window.activeLogDetailId])await showLogDetail(window.activeLogDetailId,{silent:true})}catch(e){console.error('load logs failed:',e);if(!silent)showToast('加载日志失败: '+e.message,'error')}},
         refreshLogs=async()=>{await loadLogs()},
         clearAllLogs=async()=>{if(!confirm('确定要清空所有日志吗？此操作不可恢复！'))return;try{const r=await apiRequest('/api/logs',{method:'DELETE'});if(!r)return;const d=await r.json();if(d.success){window.logDetailCache=Object.create(null);window.activeLogDetailId=null;resetLogMediaCache();showToast('日志已清空','success');await loadLogs()}else{showToast('清空失败: '+(d.message||'未知错误'),'error')}}catch(e){showToast('清空失败: '+e.message,'error')}},
         showLogDetail=async(logId,opts={})=>{const silent=!!opts.silent;const modal=$('logDetailModal');const content=$('logDetailContent');window.logDetailCache=window.logDetailCache||Object.create(null);window.logListMeta=window.logListMeta||Object.create(null);window.logDetailRequestSeq=(window.logDetailRequestSeq||0)+1;const requestSeq=window.logDetailRequestSeq;window.activeLogDetailId=logId;modal.classList.remove('hidden');content.innerHTML='<div class="rounded-md border border-border p-4 bg-muted/30 text-sm text-muted-foreground">\u65e5\u5fd7\u8be6\u60c5\u52a0\u8f7d\u4e2d...</div>';try{const meta=window.logListMeta[logId];let log=window.logDetailCache[logId];if(!log||!meta||log.updated_at!==meta.updated_at){const r=await apiRequest(`/api/logs/${logId}`);if(!r)return;if(window.logDetailRequestSeq!==requestSeq||window.activeLogDetailId!==logId||modal.classList.contains('hidden'))return;if(r.status===404){content.innerHTML='<div class="rounded-md border border-red-200 p-4 bg-red-50 text-sm text-red-700">\u65e5\u5fd7\u4e0d\u5b58\u5728\u6216\u5df2\u88ab\u5220\u9664</div>';return}log=await r.json();window.logDetailCache[logId]=log}if(window.logDetailRequestSeq!==requestSeq||window.activeLogDetailId!==logId||modal.classList.contains('hidden'))return;renderLogDetail(log)}catch(e){if(window.logDetailRequestSeq!==requestSeq||window.activeLogDetailId!==logId||modal.classList.contains('hidden'))return;console.error('\u52a0\u8f7d\u65e5\u5fd7\u8be6\u60c5\u5931\u8d25:',e);content.innerHTML=`<div class="rounded-md border border-red-200 p-4 bg-red-50 text-sm text-red-700">\u52a0\u8f7d\u65e5\u5fd7\u8be6\u60c5\u5931\u8d25: ${escapeLogHtml(e.message||'\u672a\u77e5\u9519\u8bef')}</div>`;if(!silent)showToast('\u52a0\u8f7d\u65e5\u5fd7\u8be6\u60c5\u5931\u8d25: '+e.message,'error')}},
@@ -994,9 +974,9 @@
         pollCaptchaRuntimeStatus=async(method,opts={})=>{const silent=!!opts.silent;try{const r=await apiRequest(`/api/captcha/runtime-status?method=${encodeURIComponent(method)}`);if(!r)return null;const d=await r.json();const state=String(d.state||'idle').trim();const message=String(d.message||'').trim();const key=`${state}:${d.sequence||0}:${message}`;const meta=window.captchaRuntimeStatusMeta||{key:'',lastToastAt:0,method:method};const now=Date.now();const shouldRepeat=message&&now-(meta.lastToastAt||0)>=5000;const shouldToast=!silent&&message&&(key!==meta.key||shouldRepeat);if(shouldToast){const toastType=state==='error'?'error':(state==='ready'?'success':'info');showToast(message,toastType,state==='ready'||state==='error'?3600:2600);meta.lastToastAt=now}meta.key=key;meta.method=method;meta.state=state;window.captchaRuntimeStatusMeta=meta;if(state==='ready'||state==='error'||(!d.active&&!d.task_running&&state!=='running'))stopCaptchaRuntimeStatusPolling();return d}catch(e){console.error('轮询浏览器环境状态失败:',e);if(!silent)showToast('获取浏览器环境状态失败: '+e.message,'error',3200);stopCaptchaRuntimeStatusPolling();return null}},
         startCaptchaRuntimeStatusPolling=(method,initialMessage='')=>{stopCaptchaRuntimeStatusPolling();window.captchaRuntimeStatusMeta={key:'',lastToastAt:0,method:method,state:'running'};if(initialMessage)showToast(initialMessage,'info',2800);pollCaptchaRuntimeStatus(method,{silent:true});window.captchaRuntimeStatusTimer=setInterval(()=>{pollCaptchaRuntimeStatus(method)},3000)},
         resumeCaptchaRuntimeStatusPollingIfNeeded=async(method)=>{if(method!=='browser'&&method!=='personal')return;const status=await pollCaptchaRuntimeStatus(method,{silent:true});if(status&&(status.active||status.task_running||status.state==='running'))startCaptchaRuntimeStatusPolling(method)},
-        showToast=(m,t='info',duration=2000)=>{const d=document.createElement('div'),bc={success:'bg-green-600',error:'bg-destructive',info:'bg-primary'};d.className=`fixed bottom-4 right-4 ${bc[t]||bc.info} text-white px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium z-50 animate-slide-up`;d.textContent=m;document.body.appendChild(d);setTimeout(()=>{d.style.opacity='0';d.style.transition='opacity .3s';setTimeout(()=>d.parentNode&&document.body.removeChild(d),300)},duration)},
+        showToast=(m,t='info',duration=2000)=>{if(quietSave&&t==='success')return;if(quietSave&&t==='error')quietSaveFailed=true;const d=document.createElement('div'),bc={success:'bg-green-600',error:'bg-destructive',info:'bg-primary'};d.className=`fixed bottom-4 right-4 ${bc[t]||bc.info} text-white px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium z-50 animate-slide-up`;d.textContent=m;document.body.appendChild(d);setTimeout(()=>{d.style.opacity='0';d.style.transition='opacity .3s';setTimeout(()=>d.parentNode&&document.body.removeChild(d),300)},duration)},
         logout=async()=>{if(!confirm('确定要退出登录吗?'))return;try{await fetch('/api/admin/logout',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'}})}catch(e){console.error('服务端退出登录失败:',e)}finally{location.href='/login'}},
-        switchTab=t=>{if(!['tokens','settings','logs'].includes(t))return;history.replaceState(null,'','#'+t);window.dispatchEvent(new Event('flow:navigation'));const cap=n=>n.charAt(0).toUpperCase()+n.slice(1);['tokens','settings','logs'].forEach(n=>{const active=n===t;$(`panel${cap(n)}`).classList.toggle('hidden',!active);$(`tab${cap(n)}`).classList.toggle('border-primary',active);$(`tab${cap(n)}`).classList.toggle('text-primary',active);$(`tab${cap(n)}`).classList.toggle('border-transparent',!active);$(`tab${cap(n)}`).classList.toggle('text-muted-foreground',!active)});if(t==='settings'){stopLogsAutoRefresh();loadAdminConfig();loadProxyConfig();loadCacheConfig();loadGenerationTimeout();loadCallLogicConfig();loadCaptchaConfig();loadPluginConfig();loadATAutoRefreshConfig()}else if(t==='logs'){startLogsAutoRefresh();loadLogs()}else{stopLogsAutoRefresh()}};
+        switchTab=t=>{if(!['tokens','settings','logs'].includes(t))return;const titles={tokens:['Google 账号','查看哪些账号可以生成，以及今日用量。'],settings:['系统配置','先选择连接和验证码，再保存。'],logs:['请求日志','查看每次生成的结果和失败原因。']};const heading=$('manageTitle'),sub=$('manageSubtitle');if(heading&&sub&&titles[t]){heading.textContent=titles[t][0];sub.textContent=titles[t][1];document.title=titles[t][0]+' - Flow2API'}history.replaceState(null,'','#'+t);window.dispatchEvent(new Event('flow:navigation'));const cap=n=>n.charAt(0).toUpperCase()+n.slice(1);['tokens','settings','logs'].forEach(n=>{const active=n===t;$(`panel${cap(n)}`).classList.toggle('hidden',!active);$(`tab${cap(n)}`).classList.toggle('border-primary',active);$(`tab${cap(n)}`).classList.toggle('text-primary',active);$(`tab${cap(n)}`).classList.toggle('border-transparent',!active);$(`tab${cap(n)}`).classList.toggle('text-muted-foreground',!active)});if(t==='settings'){stopLogsAutoRefresh();loadAdminConfig();loadProxyConfig();loadCacheConfig();loadGenerationTimeout();loadCallLogicConfig();loadCaptchaConfig();loadPluginConfig();loadATAutoRefreshConfig()}else if(t==='logs'){startLogsAutoRefresh();loadLogs()}else{stopLogsAutoRefresh()}};
 
         function escapeLogHtml(text){
             if(text===null||text===undefined) return '';
@@ -1201,72 +1181,237 @@
             button.remove();
         }
 
+        function parseConcurrency(value){
+            const text=String(value??'').trim();
+            if(!text) return -1;
+            const number=parseInt(text,10);
+            return Number.isFinite(number)&&number>=0?number:-1;
+        }
+        function concurrencyField(value){
+            if(value===null||value===undefined||value==='') return '';
+            const number=Number(value);
+            return Number.isFinite(number)&&number>=0?String(number):'';
+        }
+        function accountName(token){
+            return token.login_account||token.email||'';
+        }
+        function applyAccountList(){
+            if(!accountList) accountList=FlowList.load('accounts',{sort:'account',order:'asc'});
+            const query=($('accountSearch')?.value||'').trim().toLowerCase();
+            const status=$('accountStatus')?.value||'all';
+            let items=allTokens.filter(token=>{
+                const name=accountName(token).toLowerCase();
+                const remark=String(token.remark||'').toLowerCase();
+                if(query&&!name.includes(query)&&!remark.includes(query)) return false;
+                if(status==='active'&&!token.is_active) return false;
+                if(status==='inactive'&&token.is_active) return false;
+                return true;
+            });
+            const direction=accountList.order==='asc'?1:-1;
+            items.sort((a,b)=>{
+                if(accountList.sort==='credits') return ((Number(a.credits)||0)-(Number(b.credits)||0))*direction;
+                if(accountList.sort==='today'){
+                    const left=(Number(a.today_image_count)||0)+(Number(a.today_video_count)||0);
+                    const right=(Number(b.today_image_count)||0)+(Number(b.today_video_count)||0);
+                    return (left-right)*direction;
+                }
+                return accountName(a).localeCompare(accountName(b))*direction;
+            });
+            const page=FlowList.paginate(items,accountList);
+            if($('sortAccount')) $('sortAccount').textContent=FlowList.label('账号','account',accountList);
+            if($('sortCredits')) $('sortCredits').textContent=FlowList.label('余额','credits',accountList);
+            if($('sortToday')) $('sortToday').textContent=FlowList.label('今日图片/视频','today',accountList);
+            const empty=$('accountEmpty');
+            const body=$('tokenTableBody');
+            if(!allTokens.length){
+                if(empty){empty.hidden=false;empty.textContent='还没有账号。点右上角「添加账号」。'}
+                if(body) body.innerHTML='';
+            }else if(!page.total){
+                if(empty){empty.hidden=false;empty.textContent='没有匹配的账号。'}
+                if(body) body.innerHTML='';
+            }else{
+                if(empty) empty.hidden=true;
+                if(body) body.innerHTML=page.pageItems.map(token=>{
+                    const name=accountName(token)||'-';
+                    const mode=token.protocol_mode==='protocol'?'协议登录':'浏览器扩展';
+                    const state=token.is_active?'<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-green-50 text-green-700">可用</span>':'<span class="inline-flex items-center rounded px-2 py-0.5 text-xs bg-gray-100 text-gray-700">已停用</span>';
+                    const credits=token.credits===undefined||token.credits===null?'-':escapeLogHtml(token.credits);
+                    const remark=token.remark?`<div class="text-xs text-muted-foreground truncate max-w-[240px]">${escapeLogHtml(token.remark)}</div>`:'';
+                    return `<tr class="hover:bg-muted/20"><td class="py-3 px-2.5 align-middle"><div class="text-sm font-medium break-all">${escapeLogHtml(name)}</div>${remark}</td><td class="py-3 px-2.5 align-middle"><div>${state}</div><div class="text-xs text-muted-foreground mt-1">${mode}</div></td><td class="py-3 px-2.5 text-right align-middle"><button type="button" onclick="refreshTokenCredits(${token.id})" class="text-sm font-medium text-blue-700 hover:underline" title="重新读取余额">${credits}</button></td><td class="py-3 px-2.5 text-right align-middle whitespace-nowrap text-sm">${Number(token.today_image_count)||0} / ${Number(token.today_video_count)||0}</td><td class="py-3 px-2.5 text-right align-middle">${renderTokenActions(token)}</td></tr>`;
+                }).join('');
+            }
+            FlowList.render($('accountPager'),accountList,page.total,applyAccountList);
+        }
+        function logBucket(log){
+            const code=Number(log&&log.status_code);
+            if(code===200) return 'ok';
+            if(code>=400) return 'fail';
+            if(code===102) return 'run';
+            const text=formatLogStatus(log);
+            if(text==='失败') return 'fail';
+            if(text==='已完成') return 'ok';
+            return 'run';
+        }
+        function renderLogRows(){
+            if(!logList) logList=FlowList.load('logs',{sort:'time',order:'desc'});
+            const logs=window.allLogs||[];
+            const query=($('logSearch')?.value||'').trim().toLowerCase();
+            const status=$('logStatus')?.value||'all';
+            const kind=$('logKind')?.value||'all';
+            let items=logs.filter(log=>{
+                const account=String(log.token_email||'').toLowerCase();
+                const outcome=formatLogOutcome(log).toLowerCase();
+                const kindLabel=getLogOperationLabel(log).toLowerCase();
+                if(query&&!account.includes(query)&&!outcome.includes(query)&&!kindLabel.includes(query)) return false;
+                if(status!=='all'&&logBucket(log)!==status) return false;
+                const operation=String(log.operation||'');
+                if(kind==='image'&&operation!=='generate_image') return false;
+                if(kind==='video'&&operation!=='generate_video'&&operation!=='extend_video') return false;
+                return true;
+            });
+            const direction=logList.order==='asc'?1:-1;
+            items.sort((a,b)=>{
+                if(logList.sort==='duration') return ((Number(a.duration)||0)-(Number(b.duration)||0))*direction;
+                return (new Date(a.created_at||0).getTime()-new Date(b.created_at||0).getTime())*direction;
+            });
+            if($('sortLogTime')) $('sortLogTime').textContent=FlowList.label('时间','time',logList);
+            if($('sortLogDuration')) $('sortLogDuration').textContent=FlowList.label('耗时','duration',logList);
+            const page=FlowList.paginate(items,logList);
+            const empty=$('logEmpty');
+            const body=$('logsTableBody');
+            if(!logs.length){
+                if(empty){empty.hidden=false;empty.textContent='还没有日志。'}
+                if(body) body.innerHTML='';
+            }else if(!page.total){
+                if(empty){empty.hidden=false;empty.textContent='没有匹配的日志。'}
+                if(body) body.innerHTML='';
+            }else{
+                if(empty) empty.hidden=true;
+                if(body) body.innerHTML=page.pageItems.map(log=>{
+                    const when=log.created_at?new Date(log.created_at).toLocaleString('zh-CN'):'-';
+                    const kindLabel=getLogOperationLabel(log);
+                    const outcome=formatLogOutcome(log);
+                    const result=kindLabel&&!outcome.startsWith(kindLabel)?`${kindLabel} · ${outcome}`:outcome;
+                    const account=log.token_email||'未知';
+                    return `<tr><td class="py-2.5 px-3 text-xs whitespace-nowrap">${escapeLogHtml(when)}</td><td class="py-2.5 px-3"><div class="text-xs leading-5 ${formatLogOutcomeClass(log)}">${escapeLogHtml(truncateLogText(result,96))}</div></td><td class="py-2.5 px-3 text-xs break-all">${escapeLogHtml(account)}</td><td class="py-2.5 px-3 text-xs whitespace-nowrap">${Number(log.duration||0).toFixed(1)} 秒</td><td class="py-2.5 px-3 text-right"><button onclick="showLogDetail(${log.id})" class="inline-flex items-center justify-center rounded-md hover:bg-blue-50 hover:text-blue-700 h-7 px-2 text-xs">查看</button></td></tr>`;
+                }).join('');
+            }
+            FlowList.render($('logPager'),logList,page.total,renderLogRows);
+        }
+        function extractLogPrompt(requestBody){
+            if(!requestBody||typeof requestBody!=='object') return '';
+            const messages=Array.isArray(requestBody.messages)?requestBody.messages:[];
+            const parts=[];
+            messages.forEach(message=>{
+                const content=message&&message.content;
+                if(typeof content==='string') parts.push(content);
+                else if(Array.isArray(content)) content.forEach(item=>{
+                    if(typeof item==='string') parts.push(item);
+                    else if(item&&item.type==='text'&&item.text) parts.push(item.text);
+                });
+            });
+            return parts.join('\n').trim();
+        }
+        async function updateAdminUsername(){
+            const username=$('cfgAdminUsername').value.trim();
+            const oldPassword=$('cfgUsernamePassword').value.trim();
+            if(!username) return showToast('请输入用户名','error');
+            if(!oldPassword) return showToast('修改用户名需要当前密码','error');
+            try{
+                const response=await apiRequest('/api/admin/password',{method:'POST',body:JSON.stringify({username,old_password:oldPassword})});
+                if(!response) return;
+                const data=await response.json();
+                if(data.success){$('cfgUsernamePassword').value='';showToast('用户名已修改','success')}
+                else showToast(data.detail||'修改失败','error');
+            }catch(error){showToast('修改失败: '+error.message,'error')}
+        }
+        function copyCurrentKey(){
+            const key=$('cfgCurrentAPIKey').value;
+            if(!key) return showToast('还没有调用密钥','error');
+            const done=()=>showToast('调用密钥已复制','success');
+            if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(key).then(done).catch(()=>showToast('复制失败','error'));
+            else showToast('复制失败','error');
+        }
+        async function saveDebugConfig(){
+            const enabled=$('cfgDebugEnabled').checked;
+            try{
+                const response=await apiRequest('/api/admin/debug',{method:'POST',body:JSON.stringify({enabled})});
+                if(!response){quietSaveFailed=true;return}
+                const data=await response.json();
+                if(!data.success){showToast(data.detail||'保存排错日志失败','error');$('cfgDebugEnabled').checked=!enabled}
+            }catch(error){showToast('保存排错日志失败: '+error.message,'error');$('cfgDebugEnabled').checked=!enabled}
+        }
+        async function saveAllSettings(){
+            if(quietSave) return;
+            quietSave=true;
+            quietSaveFailed=false;
+            try{
+                for(const step of [saveProxyConfig,saveGenerationTimeout,saveCallLogicConfig,saveAdminConfig,saveCacheConfig,savePluginConfig,saveCaptchaConfig,saveDebugConfig]){
+                    await step();
+                    if(quietSaveFailed) return;
+                }
+            }catch(error){
+                quietSaveFailed=true;
+                showToast('保存失败: '+error.message,'error');
+            }finally{
+                const failed=quietSaveFailed;
+                quietSave=false;
+                quietSaveFailed=false;
+                if(!failed) showToast('更改已保存','success');
+            }
+        }
         function renderLogDetail(log){
             if(!log){showToast('日志不存在','error');return}
             resetLogMediaCache();
-            const responseBodyObj=parseLogJson(log.response_body);
-            const requestPayloadText=formatLogPayload(log.request_body);
-            const responsePayloadText=formatLogPayload(log.response_body);
-            const toggleLogId=String(log.id??'');
-            const errorSummary=extractLogErrorSummary(log,responseBodyObj);
-            const successSummary=extractLogSuccessSummary(log,responseBodyObj);
-            let detailHtml='';
-
-            detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm">请求数据</h4><pre class="rounded-md border border-border p-3 bg-muted/30 text-xs overflow-x-auto">${escapeLogHtml(requestPayloadText)}</pre></div>`;
-
-            if(log.status_code===200){
-                if(successSummary){
-                    detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm text-green-700">结果摘要</h4><div class="rounded-md border border-green-200 p-3 bg-green-50"><p class="text-sm text-green-700">${escapeLogHtml(successSummary)}</p></div></div>`;
-                }
-                if(responseBodyObj){
-                    const directUrl=extractLogPrimaryUrl(responseBodyObj);
-                    if(directUrl){
-                        detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm">生成结果</h4><div class="rounded-md border border-border p-3 bg-muted/30 space-y-3">${renderMediaPreview('主结果',directUrl)}</div></div>`;
-                    }
-
-                    const assets=responseBodyObj.generated_assets;
-                    if(assets&&typeof assets==='object'){
-                        let assetsHtml='';
-
-                        if(assets.upscaled_image&&typeof assets.upscaled_image==='object'){
-                            const up=assets.upscaled_image;
-                            const upResolution=up.resolution||'放大';
-                            const upPreviewUrl=up.local_url||up.url||null;
-                            assetsHtml+=`<p class="text-xs"><span class="font-medium">放大分辨率:</span> ${escapeLogHtml(upResolution)}</p>`;
-                            if(upPreviewUrl){
-                                assetsHtml+=renderMediaPreview(`${upResolution}结果`,upPreviewUrl,!/^data:/i.test(String(upPreviewUrl||'')));
-                            }
-                            if(up.base64){
-                                const preview=String(up.base64).length>600?`${String(up.base64).slice(0,600)}...`:String(up.base64);
-                                assetsHtml+=`<p class="text-xs"><span class="font-medium">Base64长度:</span> ${String(up.base64).length}</p><details class="rounded border border-border p-2 bg-background"><summary class="cursor-pointer text-xs text-muted-foreground">查看Base64预览</summary><pre class="mt-2 text-xs overflow-x-auto">${escapeLogHtml(preview)}</pre></details>`;
-                            }
-                        }else{
-                            const extraMediaUrl=assets.final_video_url||assets.final_image_url||null;
-                            if(extraMediaUrl&&extraMediaUrl!==directUrl){
-                                assetsHtml+=renderMediaPreview('额外结果',extraMediaUrl,false);
-                            }
-                        }
-
-                        detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm">2K/4K 资产信息</h4><div class="rounded-md border border-border p-3 bg-muted/30 space-y-2">${assetsHtml||'<p class="text-xs text-muted-foreground">无资产详情</p>'}</div></div>`;
-                    }
-
-                    detailHtml+=`<details class="space-y-2"><summary class="cursor-pointer text-sm font-medium">完整响应（大字段已截断）</summary><pre class="mt-2 rounded-md border border-border p-3 bg-muted/30 text-xs overflow-x-auto">${escapeLogHtml(responsePayloadText)}</pre></details>`;
-                }else{
-                    detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm">响应数据</h4><pre class="rounded-md border border-border p-3 bg-muted/30 text-xs overflow-x-auto">${escapeLogHtml(responsePayloadText)}</pre></div>`;
-                }
+            const responseBody=parseLogJson(log.response_body);
+            const requestBody=parseLogJson(log.request_body);
+            const model=requestBody&&requestBody.model?String(requestBody.model):'';
+            const prompt=extractLogPrompt(requestBody);
+            const directUrl=extractLogPrimaryUrl(responseBody);
+            const failed=Number(log.status_code)>=400||formatLogStatus(log)==='失败';
+            const errorSummary=extractLogErrorSummary(log,responseBody);
+            let summary='<div class="space-y-3">';
+            summary+=`<div><p class="text-xs text-muted-foreground">模型</p><p class="text-sm break-all">${escapeLogHtml(model||'这次请求没有记录模型')}</p></div>`;
+            summary+=`<div><p class="text-xs text-muted-foreground">提示词</p><p class="text-sm whitespace-pre-wrap">${escapeLogHtml(prompt||'这次请求没有记录提示词')}</p></div>`;
+            if(!failed&&directUrl){
+                summary+=`<div><p class="text-xs text-muted-foreground">结果链接</p><div class="rounded-md border border-border p-3 bg-muted/30 space-y-3">${renderMediaPreview('结果',directUrl)}</div></div>`;
+            }else if(failed){
+                summary+=`<div><p class="text-xs text-muted-foreground">失败原因</p><p class="text-sm text-red-700 break-all">${escapeLogHtml(errorSummary||'没有记录失败原因')}</p></div>`;
             }else{
-                if(errorSummary){
-                    detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm text-red-600">错误原因</h4><div class="rounded-md border border-red-200 p-3 bg-red-50"><p class="text-sm text-red-700 break-all">${escapeLogHtml(errorSummary)}</p></div></div>`;
-                }
-                detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm text-red-600">错误响应</h4><pre class="rounded-md border border-red-200 p-3 bg-red-50 text-xs overflow-x-auto">${escapeLogHtml(responsePayloadText)}</pre></div>`;
+                summary+=`<div><p class="text-xs text-muted-foreground">结果</p><p class="text-sm">${escapeLogHtml(extractLogSuccessSummary(log,responseBody)||formatLogStatus(log))}</p></div>`;
             }
-
-            detailHtml+=`<div class="space-y-2 pt-4 border-t border-border"><h4 class="font-medium text-sm">基本信息</h4><div class="grid grid-cols-2 gap-2 text-sm"><div><span class="text-muted-foreground">操作:</span> ${escapeLogHtml(log.operation||'-')}</div><div><span class="text-muted-foreground">状态:</span> ${escapeLogHtml(formatLogStatus(log))}</div><div><span class="text-muted-foreground">状态码:</span> <span class="inline-flex items-center rounded px-2 py-0.5 text-xs ${log.status_code===200?'bg-green-50 text-green-700':(log.status_code===102?'bg-amber-50 text-amber-700':'bg-red-50 text-red-700')}">${escapeLogHtml(log.status_code??'-')}</span></div><div><span class="text-muted-foreground">耗时:</span> ${Number(log.duration||0).toFixed(2)}秒</div><div><span class="text-muted-foreground">时间:</span> ${log.created_at?new Date(log.created_at).toLocaleString('zh-CN'):'-'}</div><div><span class="text-muted-foreground">Token:</span> ${escapeLogHtml(log.token_email||log.token_username||'未知')}</div><div><span class="text-muted-foreground">日志ID:</span> ${escapeLogHtml(log.id??'-')}</div><div><span class="text-muted-foreground">进度:</span> ${escapeLogHtml(formatLogProgress(log))}</div></div></div>`;
-
-            const detailContent=$('logDetailContent');detailContent.dataset.logId=String(log.id??'');detailContent.innerHTML=detailHtml;syncLogDetailViewState();
+            summary+='</div>';
+            let extra='';
+            const upscaled=responseBody&&responseBody.generated_assets&&responseBody.generated_assets.upscaled_image;
+            if(!failed&&upscaled&&typeof upscaled==='object'){
+                const upUrl=upscaled.local_url||upscaled.url;
+                if(upUrl&&upUrl!==directUrl) extra+=`<div class="space-y-2"><h4 class="font-medium text-sm">放大后的图片</h4><div class="rounded-md border border-border p-3 bg-muted/30">${renderMediaPreview(upscaled.resolution||'放大',upUrl,!/^data:/i.test(String(upUrl)))}</div></div>`;
+            }
+            const technical=`<details class="space-y-2"><summary class="cursor-pointer text-sm font-medium">技术详情</summary><div class="mt-2 space-y-3"><div class="grid grid-cols-2 gap-2 text-sm"><div><span class="text-muted-foreground">账号:</span> ${escapeLogHtml(log.token_email||log.token_username||'未知')}</div><div><span class="text-muted-foreground">耗时:</span> ${Number(log.duration||0).toFixed(1)} 秒</div><div><span class="text-muted-foreground">状态码:</span> ${escapeLogHtml(log.status_code??'-')}</div><div><span class="text-muted-foreground">时间:</span> ${log.created_at?new Date(log.created_at).toLocaleString('zh-CN'):'-'}</div></div><div><h4 class="font-medium text-sm mb-1">请求数据</h4><pre class="rounded-md border border-border p-3 bg-muted/30 text-xs overflow-x-auto">${escapeLogHtml(formatLogPayload(log.request_body))}</pre></div><div><h4 class="font-medium text-sm mb-1">响应数据</h4><pre class="rounded-md border border-border p-3 bg-muted/30 text-xs overflow-x-auto">${escapeLogHtml(formatLogPayload(log.response_body))}</pre></div></div></details>`;
+            const detailContent=$('logDetailContent');
+            detailContent.dataset.logId=String(log.id??'');
+            detailContent.innerHTML=summary+extra+technical;
+            syncLogDetailViewState();
         }
 
-        window.addEventListener('DOMContentLoaded',()=>{refreshTokens();loadATAutoRefreshConfig()});
+        window.addEventListener('DOMContentLoaded',()=>{
+            accountList=FlowList.load('accounts',{sort:'account',order:'asc'});
+            logList=FlowList.load('logs',{sort:'time',order:'desc'});
+            const resetAccount=()=>{accountList.page=1;applyAccountList()};
+            $('accountSearch')?.addEventListener('input',resetAccount);
+            $('accountStatus')?.addEventListener('change',resetAccount);
+            $('sortAccount')?.addEventListener('click',()=>{FlowList.toggle(accountList,'account');applyAccountList()});
+            $('sortCredits')?.addEventListener('click',()=>{FlowList.toggle(accountList,'credits');applyAccountList()});
+            $('sortToday')?.addEventListener('click',()=>{FlowList.toggle(accountList,'today');applyAccountList()});
+            const resetLogs=()=>{logList.page=1;renderLogRows()};
+            $('logSearch')?.addEventListener('input',resetLogs);
+            $('logStatus')?.addEventListener('change',resetLogs);
+            $('logKind')?.addEventListener('change',resetLogs);
+            $('sortLogTime')?.addEventListener('click',()=>{FlowList.toggle(logList,'time');renderLogRows()});
+            $('sortLogDuration')?.addEventListener('click',()=>{FlowList.toggle(logList,'duration');renderLogRows()});
+            refreshTokens();
+            loadATAutoRefreshConfig();
+        });
     </script>
     <script src="/assets/manage.js"></script>
 </body>

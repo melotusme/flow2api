@@ -39,6 +39,19 @@ class MediaArchiveTests(unittest.IsolatedAsyncioTestCase):
             cache.download_and_cache.assert_not_called()
             self.assertEqual({i['type'] for i in archive.list_items()}, {'video', 'image'})
 
+    async def test_prompt_and_model_are_stored_once(self):
+        with tempfile.TemporaryDirectory() as d:
+            archive = MediaArchive(Path(d) / 'saved')
+            name = archive.save_bytes(PNG, 'image')
+            self.assertNotIn('prompt', archive.list_items()[0])
+            archive.save_bytes(PNG, 'image', {'prompt': '黄色茶壶', 'model': 'gemini-test', 'model_name': '茶壶模型'})
+            item = archive.list_items()[0]
+            self.assertEqual(item['filename'], name)
+            self.assertEqual(item['prompt'], '黄色茶壶')
+            self.assertEqual(item['model_name'], '茶壶模型')
+            archive.save_bytes(PNG, 'image', {'prompt': '另一句', 'model': 'other'})
+            self.assertEqual(archive.list_items()[0]['prompt'], '黄色茶壶')
+
     async def test_error_page_is_not_saved_as_success(self):
         with tempfile.TemporaryDirectory() as d:
             archive = MediaArchive(d)

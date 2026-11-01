@@ -106,6 +106,36 @@ impl App {
         self.refresh()?;
         Ok(account)
     }
+    pub async fn try_auto_sync(&self, id: &str) -> Result<Option<Account>> {
+        let Ok(_admission) = self.job_gate.try_lock() else {
+            return Ok(None);
+        };
+        if self.ensure_available().is_err() || self.status().busy() {
+            return Ok(None);
+        }
+        let Some(session) = self.browsers.existing_session(id).await else {
+            return Ok(None);
+        };
+        let mut account = self.store.account(id)?;
+        let mut session = session.lock().await;
+        if session.verify_account(&account.email).await.is_err() {
+            return Ok(None);
+        }
+        let Ok(credits) = flow::rpc(&mut session, "nzlxg", json!([]), None).await else {
+            return Ok(None);
+        };
+        account.credits = credits
+            .as_array()
+            .and_then(|a| a.iter().find_map(Value::as_i64));
+        account.last_synced = Some(now());
+        self.store.save_account(&account)?;
+        self.change_status(|s| {
+            s.browser = format!("已连接 {}", account.email);
+            s.last_error = None;
+        });
+        self.refresh()?;
+        Ok(Some(account))
+    }
     pub async fn submit(self: &Arc<Self>, mut request: GenerationRequest) -> Result<Task> {
         let _admission = self.job_gate.lock().await;
         self.ensure_available()?;
@@ -484,6 +514,16 @@ impl App {
                 .await
                 .context("作品归档失败")?;
         }
+        let (prompt, model) = self
+            .store
+            .task(task_id)
+            .map(|t| {
+                (
+                    t.request.prompt.chars().take(2000).collect::<String>(),
+                    t.request.model,
+                )
+            })
+            .unwrap_or_default();
         let media = Media {
             filename,
             kind: kind.into(),
@@ -491,6 +531,8 @@ impl App {
             created_at: now(),
             task_id: task_id.into(),
             media_id: media_id.into(),
+            prompt,
+            model,
         };
         tokio::fs::write(
             target.with_extension("json"),
@@ -674,6 +716,22 @@ mod tests {
         assert!(encoded_image(&json!(STANDARD.encode(b"<html>error</html>"))).is_none());
         let directory = tempfile::tempdir()?;
         let app = App::open(directory.path())?;
+        app.store.save_task(&Task {
+            id: "job".into(),
+            request: GenerationRequest {
+                model: "gemini-3.1-flash-image-square".into(),
+                prompt: "yellow teapot".into(),
+                images: vec![],
+                account_id: None,
+                video_id: None,
+            },
+            state: "running".into(),
+            stage: String::new(),
+            created_at: now(),
+            updated_at: now(),
+            error: None,
+            results: vec![],
+        })?;
         let media = app
             .archive_bytes(
                 &encoded_image(&payload).unwrap(),
@@ -683,6 +741,8 @@ mod tests {
             )
             .await?;
         assert_eq!(media.media_id, "source-id");
+        assert_eq!(media.prompt, "yellow teapot");
+        assert_eq!(media.model, "gemini-3.1-flash-image-square");
         assert_eq!(
             tokio::fs::read(directory.path().join("generated").join(media.filename)).await?,
             bytes

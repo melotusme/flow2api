@@ -200,19 +200,31 @@ impl App {
         self.change_status(|s| s.browser = "已关闭".into());
         Ok(())
     }
-    pub async fn save_settings(&self, settings: Settings) -> Result<()> {
-        let _admission = self.job_gate.lock().await;
+    pub fn sync_workers(&self, old: usize, new: usize) {
+        if new > old {
+            self.workers.add_permits(new - old);
+        } else {
+            self.workers.forget_permits(old - new);
+        }
+    }
+    pub async fn save_settings(self: &Arc<Self>, settings: Settings) -> Result<()> {
+        let admission = self.job_gate.lock().await;
         self.ensure_available()?;
-        if self.status().busy() || self.status().service == "running" {
-            bail!("请先停止 API，再修改运行设置");
+        if self.status().busy() {
+            bail!("仍有执行或排队任务，请等待完成后修改运行设置");
+        }
+        if matches!(self.status().service.as_str(), "starting" | "stopping") {
+            bail!("API 正在切换状态，请稍后再试");
         }
         let previous = self.store.settings()?;
         let old = previous.max_concurrent;
         self.store.save_settings(&settings)?;
-        if settings.max_concurrent > old {
-            self.workers.add_permits(settings.max_concurrent - old);
+        self.sync_workers(old, settings.max_concurrent);
+        let was_running = self.status().service == "running";
+        if was_running {
+            self.stop_service_locked(admission).await?;
         } else {
-            self.workers.forget_permits(old - settings.max_concurrent);
+            drop(admission);
         }
         self.browsers.close_all().await;
         if previous.browser_executable != settings.browser_executable {
@@ -222,6 +234,9 @@ impl App {
                 self.store.save_account(&account)?;
             }
             self.refresh()?;
+        }
+        if was_running {
+            self.start_service().await?;
         }
         Ok(())
     }

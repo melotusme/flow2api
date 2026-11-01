@@ -149,8 +149,30 @@ async fn delete_account(state: tauri::State<'_, Desktop>, id: String) -> Result<
     result(&state.core, state.core.refresh())
 }
 #[tauri::command]
-async fn open_login(state: tauri::State<'_, Desktop>, id: String) -> Result<(), String> {
-    result(&state.core, state.core.open_login(&id).await)
+async fn open_login(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Desktop>,
+    id: String,
+) -> Result<(), String> {
+    result(&state.core, state.core.open_login(&id).await)?;
+    let core = state.core.clone();
+    tauri::async_runtime::spawn(async move {
+        for _ in 0..60 {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            if core.browsers.existing_session(&id).await.is_none() {
+                break;
+            }
+            if let Ok(Some(account)) = core.try_auto_sync(&id).await {
+                let _ = app.emit("account-synced", &account);
+                let _ = app.emit(
+                    "notice",
+                    format!("已自动检测到 {} 登录成功并完成同步。", account.email),
+                );
+                break;
+            }
+        }
+    });
+    Ok(())
 }
 #[tauri::command]
 async fn sync_account(state: tauri::State<'_, Desktop>, id: String) -> Result<Account, String> {
@@ -220,13 +242,21 @@ async fn import_legacy(
     import_settings: bool,
 ) -> Result<flow2api_core::migration::Report, String> {
     let core = state.core.clone();
-    let _gate = core.job_gate.lock().await;
-    if core.status().busy() || !["stopped", "failed"].contains(&core.status().service.as_str()) {
-        return Err("请先停止 API，再导入旧版数据".into());
+    if core.status().busy() {
+        return Err("仍有执行或排队任务，请等待完成后再导入旧版数据".into());
     }
+    if matches!(core.status().service.as_str(), "starting" | "stopping") {
+        return Err("API 正在切换状态，请稍后再试".into());
+    }
+    let was_running = core.status().service == "running";
+    if was_running {
+        result(&core, core.stop_service().await)?;
+    }
+    let old_max = result(&core, core.store.settings())?.max_concurrent;
+    let gate = core.job_gate.lock().await;
     core.browsers.close_all().await;
     let worker = core.clone();
-    let report = tokio::task::spawn_blocking(move || {
+    let outcome = tokio::task::spawn_blocking(move || {
         flow2api_core::migration::import(
             &worker.store,
             std::path::Path::new(&path),
@@ -234,25 +264,49 @@ async fn import_legacy(
         )
     })
     .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
-    result(&core, core.refresh())?;
-    Ok(report)
+    .map_err(|e| e.to_string())
+    .and_then(|v| v.map_err(|e| e.to_string()));
+    if let Ok(settings) = core.store.settings() {
+        core.sync_workers(old_max, settings.max_concurrent);
+    }
+    let _ = core.refresh();
+    drop(gate);
+    if was_running {
+        let _ = core.start_service().await;
+    }
+    outcome
 }
 #[tauri::command]
 async fn rollback_legacy(state: tauri::State<'_, Desktop>, id: String) -> Result<(), String> {
     let core = state.core.clone();
-    let _gate = core.job_gate.lock().await;
-    if core.status().busy() || !["stopped", "failed"].contains(&core.status().service.as_str()) {
-        return Err("请先停止 API，再撤销导入".into());
+    if core.status().busy() {
+        return Err("仍有执行或排队任务，请等待完成后再撤销导入".into());
     }
+    if matches!(core.status().service.as_str(), "starting" | "stopping") {
+        return Err("API 正在切换状态，请稍后再试".into());
+    }
+    let was_running = core.status().service == "running";
+    if was_running {
+        result(&core, core.stop_service().await)?;
+    }
+    let old_max = result(&core, core.store.settings())?.max_concurrent;
+    let gate = core.job_gate.lock().await;
     core.browsers.close_all().await;
     let worker = core.clone();
-    tokio::task::spawn_blocking(move || flow2api_core::migration::rollback(&worker.store, &id))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-    result(&core, core.refresh())
+    let outcome =
+        tokio::task::spawn_blocking(move || flow2api_core::migration::rollback(&worker.store, &id))
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|v| v.map_err(|e| e.to_string()));
+    if let Ok(settings) = core.store.settings() {
+        core.sync_workers(old_max, settings.max_concurrent);
+    }
+    let _ = core.refresh();
+    drop(gate);
+    if was_running {
+        let _ = core.start_service().await;
+    }
+    outcome
 }
 #[tauri::command]
 fn open_chrome_download(app: tauri::AppHandle) -> Result<(), String> {
@@ -354,14 +408,29 @@ fn import_verge_webdav(
 async fn webdav_action(state: tauri::State<'_, Desktop>, action: String) -> Result<String, String> {
     let _guard = state.webdav.lock().await;
     if action == "pull" {
-        let _gate = state.core.job_gate.lock().await;
-        let status = state.core.status();
-        if status.busy() || !matches!(status.service.as_str(), "stopped" | "failed") {
-            return Err("请先停止 API，再下载云端配置".into());
+        let core = state.core.clone();
+        if core.status().busy() {
+            return Err("仍有执行或排队任务，请等待完成后再下载云端配置".into());
         }
-        let message = flow2api_core::webdav::perform(&state.core.store, &action).await?;
-        result(&state.core, state.core.refresh())?;
-        return Ok(message);
+        if matches!(core.status().service.as_str(), "starting" | "stopping") {
+            return Err("API 正在切换状态，请稍后再试".into());
+        }
+        let was_running = core.status().service == "running";
+        if was_running {
+            result(&core, core.stop_service().await)?;
+        }
+        let old_max = result(&core, core.store.settings())?.max_concurrent;
+        let gate = core.job_gate.lock().await;
+        let outcome = flow2api_core::webdav::perform(&core.store, &action).await;
+        if let Ok(settings) = core.store.settings() {
+            core.sync_workers(old_max, settings.max_concurrent);
+        }
+        let _ = core.refresh();
+        drop(gate);
+        if was_running {
+            let _ = core.start_service().await;
+        }
+        return outcome;
     }
     flow2api_core::webdav::perform(&state.core.store, &action).await
 }

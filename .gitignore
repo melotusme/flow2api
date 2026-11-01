@@ -44,6 +44,7 @@ logs.txt
 .vscode/
 .idea/
 .lh/
+.serena/
 *.swp
 *.swo
 *~
