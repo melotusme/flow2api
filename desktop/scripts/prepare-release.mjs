@@ -4,7 +4,10 @@ import path from 'node:path';
 const kind = process.argv[2];
 const target = process.argv[3];
 const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
-const bundle = path.join('src-tauri/target', target, 'release/bundle');
+const bundle = ['target', 'src-tauri/target']
+  .map((root) => path.join(root, target, 'release/bundle'))
+  .find((dir) => existsSync(dir));
+if (!bundle) throw new Error(`找不到 ${target} 的打包目录`);
 const out = 'release-assets';
 mkdirSync(out, {recursive: true});
 
