@@ -27,6 +27,9 @@ jobs:
         working-directory: desktop
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - if: runner.os == 'macOS'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -36,8 +39,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: node --check ui/app.js
       - run: cargo test --workspace --locked
-      - run: cargo install tauri-cli --version 2.10.1 --locked
-      - run: cargo tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+      - name: Build unsigned desktop bundles
+        shell: bash
+        run: npx --yes @tauri-apps/cli@2.10.1 build --ci --no-sign --config '{"bundle":{"createUpdaterArtifacts":false}}' --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
       # upload-artifact does not preserve Unix modes or app symlinks.
       - if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent target/universal-apple-darwin/release/bundle/macos/Flow2API.app target/universal-apple-darwin/release/bundle/macos/Flow2API-macos-universal.zip
