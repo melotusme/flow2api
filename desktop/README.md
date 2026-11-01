@@ -57,6 +57,7 @@ rtk proxy curl -fsS http://127.0.0.1:8000/metrics
 - 关闭窗口隐藏窗口并继续运行；从菜单显式退出。存在未完成任务时拒绝退出，避免静默中断。
 - 退出清理期间拒绝新任务、登录同步和重新启动 API；普通“停止 API”仍可再次启动。连续点击退出只执行一次清理；有未完成任务时保留服务，等待完成后可重试退出。
 - 重复启动唤起已有窗口，避免用户重复双击产生数据库锁错误；使用官方 Tauri 单实例插件，macOS 已实测。
+- 托盘和设置里的“登录后自动启动”读取系统开机项。手动打开显示窗口；带 `--autostart` 的自启只留在托盘或菜单栏。这个开关按设备保存，不进 WebDAV。
 - 状态来自实际 Rust HTTP 监听器与持久化任务记录，不依据 UI 按钮点击推测。
 
 ## Chrome 与账号恢复
@@ -86,7 +87,52 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 本机已生成未签名的通用开发 ZIP：`../dist/flow2api-macos-universal-debug-20261027.zip`。它包含 arm64 与 x86_64 程序，当前 Apple Silicon Mac 已启动验证；Intel Mac 实机与正式签名尚未验证。开发包不代表完整 Flow 功能验收通过。
 
-本机也已通过 cargo-xwin 交叉编译 Windows x64 程序，并产出 `../dist/Flow2API_0.1.0_x64-setup.exe`。复制到 Windows 后双击安装；安装器按用户安装，缺少 WebView2 时联网补齐。该包未签名；2b9338f 已由 Grok Bot 回报在 Windows 测试机 当前用户升级成功，health/metrics、常用邮箱填入、资料选择预览及空闲时托盘停启通过。69652ff 新包已送达，等待升级验收；真实生成及活动任务状态尚未验收。交叉编译步骤和待验证项见 `../docs/windows-cross-build.md`。
+本机也已通过 cargo-xwin 交叉编译 Windows x64 程序，并产出 `../dist/Flow2API_0.1.0_x64-setup.exe`。那是 0.1.0 未签名开发包，不是 0.2.0 私有发布。交叉编译步骤见 `../docs/windows-cross-build.md`。
+
+## WebDAV
+
+设置页提供手动测试、上传和下载。默认识别坚果云目录 `https://dav.jianguoyun.com/dav/`，专用文件是 `Flow2API/flow2api-v1.json`。应用密码写入 macOS 钥匙串或 Windows 凭据管理器，编辑框留空表示保留。可以从本机 Clash Verge Rev 只读导入，不改它的配置。
+
+同步内容是超时、并发，以及账号邮箱、启用状态和项目编号。端口、调用密钥、代理、浏览器路径、开机自启、登录时间和余额留在本机。下载前先把完整本机配置备份到数据目录的 `backups/`，保存失败会回滚这次事务。云端 JSON 只有 HTTPS，没有端到端加密。两台电脑不要同时上传。
+
+## 私有发布与安装
+
+上游源码仓库是公开的 `TheSmallHanCat/flow2api`。当前账号不能向它推送，所以发布构建读取公开 fork `melotusme/flow2api` 上的同一套提交。安装包只发布到私有 `melotusme/flow2api-releases`，Homebrew tap 是私有 `melotusme/homebrew-flow2api`。审阅用流程在 `.github/release-workflow.yml`，执行副本在发布仓库的 `.github/workflows/release.yml`，只接受手动触发。签名私钥在仓库外的 `~/.local/share/flow2api/signing/`，并作为发布仓库 Secret `TAURI_SIGNING_PRIVATE_KEY`。更新签名不是 Apple 公证，也不是 Windows Authenticode。macOS 使用 ad-hoc 签名。Windows 只有 x64 安装包，没有原生 ARM64。
+
+源码提交到远程并且两个平台都构建成功之后，才运行发布仓库的 Publish signed release。缺一个平台不能成为 latest。tap 里目前只有下载策略和 `scripts/update-cask.py`，没有 cask。第一次正式发布后，在 tap 仓库执行 `python3 scripts/update-cask.py`，核对生成的 `Casks/flow2api.rb` 再提交。在那之前 `brew install --cask` 找不到配方。
+
+macOS，在已有正式 Release 之后：
+
+```sh
+brew install gh
+gh auth login
+gh auth setup-git
+brew tap melotusme/flow2api https://github.com/melotusme/homebrew-flow2api.git
+brew trust --cask melotusme/flow2api/flow2api
+brew install --cask melotusme/flow2api/flow2api
+```
+
+Windows x64，在已有正式 Release 之后。先安装 GitHub CLI 并 `gh auth login`，必要时重开 PowerShell：
+
+```powershell
+$repo = 'melotusme/flow2api-releases'
+$tag = 'v0.2.0'
+$asset = 'Flow2API.windows.x64.exe'
+$dir = Join-Path $env:TEMP ('desktop-setup-' + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $dir | Out-Null
+gh release download $tag --repo $repo --pattern $asset --pattern SHA256SUMS --dir $dir
+if ($LASTEXITCODE -ne 0) { throw '安装包下载失败' }
+$setup = Join-Path $dir $asset
+$pattern = '^([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape($asset) + '$'
+$lines = @(Get-Content (Join-Path $dir 'SHA256SUMS') | Where-Object { $_ -match $pattern })
+if ($lines.Count -ne 1) { throw '缺少唯一的安装包校验记录' }
+$expected = ($lines[0] -split '\s+')[0]
+if ((Get-FileHash $setup -Algorithm SHA256).Hash -ne $expected) { throw 'SHA-256 校验失败' }
+$p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+if ($p.ExitCode -ne 0) { throw "安装失败：$($p.ExitCode)" }
+```
+
+这两段命令还没有在目标电脑上跑过。应用内“检查更新”用本机 `gh` 登录读取固定的私有仓库资产，令牌不进界面。没有 WinGet 包。
 
 ## 从 Python 版迁移
 

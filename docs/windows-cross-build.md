@@ -2,7 +2,7 @@
 
 ## 给使用者
 
-已产出开发安装器：`dist/Flow2API_0.1.0_x64-setup.exe`。复制到 Windows 10/11 x64 后双击安装，从开始菜单打开 Flow2API。使用者无需安装 Rust、Python、Node 或 Docker；缺少 WebView2 时安装器联网补齐，Flow 登录仍需本机 Google Chrome。
+0.1.0 开发安装器：`dist/Flow2API_0.1.0_x64-setup.exe`。它未签名，不是 0.2.0 私有发布。正式安装走私有仓库 `melotusme/flow2api-releases` 的 `Flow2API.windows.x64.exe`，当前用户 NSIS，参数是大写 `/S`。缺少 WebView2 时安装器联网补齐，Flow 登录仍需本机 Google Chrome。还没有 WinGet 包，也没有原生 Windows ARM64 包。
 
 安装路径默认为当前用户的 `%LOCALAPPDATA%\Flow2API`，桌面数据由 Tauri 保存在 `%APPDATA%\dev.flow2api.desktop`。升级安装与退出均应保留数据；卸载器仅在用户勾选删除应用数据时清除数据目录。此处是生成安装脚本的检查结果，尚未经 Windows 实机安装／升级／卸载验证。
 

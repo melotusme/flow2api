@@ -14,10 +14,14 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 flow2api-core = { path = "../crates/core" }
 tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
 anyhow.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

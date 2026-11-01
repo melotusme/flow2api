@@ -1,0 +1,123 @@
+# Review copy. The running workflow lives in the private melotusme/flow2api-releases
+# repository. This file is not under workflows/, so the public source does not publish.
+# Source is melotusme/flow2api because this account cannot push TheSmallHanCat/flow2api.
+name: Publish signed release
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or full commit SHA on melotusme/flow2api
+        default: codex/tauri-rewrite
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      needed: ${{ steps.version.outputs.needed }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.source_ref || 'codex/tauri-rewrite' }}
+        run: |
+          if printf '%s' "$REF" | grep -Eq '^[0-9a-f]{40}$'; then SHA="$REF"; else
+            SHA=$(curl -fsS -A flow2api-release "https://api.github.com/repos/melotusme/flow2api/commits/${REF}" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const sha=JSON.parse(s).sha||""; if(!/^[0-9a-f]{40}$/.test(sha)) process.exit(1); process.stdout.write(sha)})')
+          fi
+          curl -fL --retry 3 -A flow2api-release -o source.tar.gz "https://codeload.github.com/melotusme/flow2api/tar.gz/${SHA}"
+          tar -xzf source.tar.gz --strip-components=1
+          rm source.tar.gz
+          VERSION=$(node -p "JSON.parse(require('fs').readFileSync('desktop/src-tauri/tauri.conf.json','utf8')).version")
+          DRAFT=$(gh release view "v$VERSION" --repo melotusme/flow2api-releases --json isDraft --jq .isDraft 2>/dev/null || true)
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          if [ "$DRAFT" = false ]; then echo 'needed=false' >> "$GITHUB_OUTPUT"; else echo 'needed=true' >> "$GITHUB_OUTPUT"; fi
+  build:
+    needs: version
+    if: needs.version.outputs.needed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            bundles: app,dmg
+            prepare: darwin-universal
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
+            bundles: nsis
+            prepare: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    steps:
+      - name: Fetch pinned source
+        working-directory: ${{ github.workspace }}
+        env:
+          SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then echo '需要完整 commit SHA'; exit 1; fi
+          curl -fL --retry 3 -A flow2api-release -o source.tar.gz "https://codeload.github.com/melotusme/flow2api/tar.gz/${SHA}"
+          tar -xzf source.tar.gz --strip-components=1
+          rm source.tar.gz
+          test -f desktop/src-tauri/tauri.conf.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop -> target
+      - run: cargo fmt --all --check
+      - run: node --check ui/app.js
+      - run: cargo test --workspace --locked
+      - name: Build signed packages
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: cargo install tauri-cli --version 2.10.1 --locked && cargo tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+      - run: node scripts/prepare-release.mjs ${{ matrix.prepare }} ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.prepare }}
+          path: desktop/release-assets/*
+          retention-days: 7
+          if-no-files-found: error
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Fetch pinned source
+        working-directory: ${{ github.workspace }}
+        env:
+          SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then echo '需要完整 commit SHA'; exit 1; fi
+          curl -fL --retry 3 -A flow2api-release -o source.tar.gz "https://codeload.github.com/melotusme/flow2api/tar.gz/${SHA}"
+          tar -xzf source.tar.gz --strip-components=1
+          rm source.tar.gz
+          test -f desktop/scripts/publish-cross.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: desktop/release-assets
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-cross.mjs

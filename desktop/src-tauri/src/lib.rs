@@ -1,14 +1,17 @@
+mod updates;
+
 use flow2api_core::{catalog, model::*, App};
 use serde_json::Value;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -16,6 +19,8 @@ struct Desktop {
     core: Arc<App>,
     quitting: AtomicBool,
     quit_in_progress: AtomicBool,
+    webdav: tokio::sync::Mutex<()>,
+    autostart_item: Mutex<Option<CheckMenuItem<tauri::Wry>>>,
 }
 fn result<T>(core: &App, value: anyhow::Result<T>) -> Result<T, String> {
     value.map_err(|error| {
@@ -288,6 +293,78 @@ fn open_media(
 fn quit(app: tauri::AppHandle) {
     request_quit(&app);
 }
+fn apply_autostart(enabled: bool, app: &tauri::AppHandle) -> Result<bool, String> {
+    let manager = app.autolaunch();
+    let result = (|| {
+        if enabled {
+            manager.enable()
+        } else {
+            manager.disable()
+        }
+        .map_err(|error| format!("无法修改开机自启：{error}"))?;
+        let actual = manager
+            .is_enabled()
+            .map_err(|error| format!("无法读取开机自启：{error}"))?;
+        if actual != enabled {
+            return Err("系统返回的开机自启状态与请求不一致，请重试".into());
+        }
+        Ok(actual)
+    })();
+    if let Ok(slot) = app.state::<Desktop>().autostart_item.lock() {
+        if let Some(item) = slot.as_ref() {
+            let shown = manager.is_enabled().unwrap_or(false);
+            let _ = item.set_checked(shown);
+            let _ = item.set_enabled(manager.is_enabled().is_ok());
+        }
+    }
+    result
+}
+#[tauri::command]
+fn autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| format!("无法读取开机自启：{error}"))
+}
+#[tauri::command]
+fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<bool, String> {
+    apply_autostart(enabled, &app)
+}
+#[tauri::command]
+fn webdav_config(
+    state: tauri::State<Desktop>,
+) -> Result<flow2api_core::webdav::PublicConfig, String> {
+    flow2api_core::webdav::public_config(&state.core.store.root)
+}
+#[tauri::command]
+fn save_webdav(
+    state: tauri::State<Desktop>,
+    url: String,
+    username: String,
+    secret: String,
+) -> Result<flow2api_core::webdav::PublicConfig, String> {
+    flow2api_core::webdav::save_connection(&state.core.store.root, url, username, secret)
+}
+#[tauri::command]
+fn import_verge_webdav(
+    state: tauri::State<Desktop>,
+) -> Result<flow2api_core::webdav::PublicConfig, String> {
+    flow2api_core::webdav::import_verge(&state.core.store.root)
+}
+#[tauri::command]
+async fn webdav_action(state: tauri::State<'_, Desktop>, action: String) -> Result<String, String> {
+    let _guard = state.webdav.lock().await;
+    if action == "pull" {
+        let _gate = state.core.job_gate.lock().await;
+        let status = state.core.status();
+        if status.busy() || !matches!(status.service.as_str(), "stopped" | "failed") {
+            return Err("请先停止 API，再下载云端配置".into());
+        }
+        let message = flow2api_core::webdav::perform(&state.core.store, &action).await?;
+        result(&state.core, state.core.refresh())?;
+        return Ok(message);
+    }
+    flow2api_core::webdav::perform(&state.core.store, &action).await
+}
 fn show(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -345,12 +422,19 @@ fn icon(status: &Status) -> tauri::image::Image<'static> {
 }
 
 pub fn run() {
+    let autostart = tauri_plugin_autostart::Builder::new();
+    #[cfg(target_os = "macos")]
+    let autostart = autostart.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
     tauri::Builder::default()
+        .manage(updates::State::default())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(autostart.arg("--autostart").build())
         .setup(|app| {
             let core = App::open(&app.path().app_data_dir()?)?;
             let status = core.status();
@@ -358,13 +442,25 @@ pub fn run() {
                 core: core.clone(),
                 quitting: AtomicBool::new(false),
                 quit_in_progress: AtomicBool::new(false),
+                webdav: tokio::sync::Mutex::new(()),
+                autostart_item: Mutex::new(None),
             });
+            let autostart_now = app.autolaunch().is_enabled();
             let summary =
                 MenuItem::with_id(app, "summary", status.tray_summary(), false, None::<&str>)?;
             let details = MenuItem::with_id(app, "details", "等待任务", false, None::<&str>)?;
             let browser = MenuItem::with_id(app, "browser", "Chrome 未连接", false, None::<&str>)?;
             let error = MenuItem::with_id(app, "error", "最近错误：无", false, None::<&str>)?;
             let toggle = MenuItem::with_id(app, "toggle", "启动 API 服务", true, None::<&str>)?;
+            let autostart_item = CheckMenuItem::with_id(
+                app,
+                "autostart",
+                "登录后自动启动",
+                autostart_now.is_ok(),
+                autostart_now.unwrap_or(false),
+                None::<&str>,
+            )?;
+            *app.state::<Desktop>().autostart_item.lock().unwrap() = Some(autostart_item.clone());
             let menu = Menu::with_items(
                 app,
                 &[
@@ -376,6 +472,7 @@ pub fn run() {
                     &MenuItem::with_id(app, "show", "打开 Flow2API", true, None::<&str>)?,
                     &toggle,
                     &MenuItem::with_id(app, "data", "打开数据目录", true, None::<&str>)?,
+                    &autostart_item,
                     &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(app, "quit", "退出 Flow2API", true, None::<&str>)?,
                 ],
@@ -388,6 +485,14 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show(app),
                     "quit" => request_quit(app),
+                    "autostart" => {
+                        let app = app.clone();
+                        let current = app.autolaunch().is_enabled().unwrap_or(false);
+                        if let Err(error) = apply_autostart(!current, &app) {
+                            let _ = app.emit("notice", error);
+                            show(&app);
+                        }
+                    }
                     "data" => {
                         let root = app.state::<Desktop>().core.store.root.clone();
                         let _ = app.opener().open_path(root.to_string_lossy(), None::<&str>);
@@ -493,6 +598,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let _ = core.start_service().await;
             });
+            if !std::env::args().any(|arg| arg == "--autostart") {
+                show(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -528,7 +636,15 @@ pub fn run() {
             open_data,
             open_chrome_download,
             open_media,
-            quit
+            quit,
+            autostart_enabled,
+            set_autostart,
+            webdav_config,
+            save_webdav,
+            import_verge_webdav,
+            webdav_action,
+            updates::check_private_update,
+            updates::install_private_update
         ])
         .build(tauri::generate_context!())
         .expect("Flow2API desktop initialization failed")

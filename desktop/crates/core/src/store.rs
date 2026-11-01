@@ -79,6 +79,85 @@ impl Store {
         Ok(serde_json::from_str(&value)?)
     }
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
+        self.write_settings(&self.connection.lock().unwrap(), settings)
+    }
+    /// Replace only cross-device preferences and account identity fields.
+    /// Port, API key, proxy, and browser paths stay on this computer.
+    /// The write is one transaction; a failed merge leaves the previous rows.
+    pub fn merge_synced(
+        &self,
+        max_concurrent: usize,
+        image_timeout_seconds: u64,
+        video_timeout_seconds: u64,
+        accounts: &[SyncedAccount],
+    ) -> Result<()> {
+        let mut seen = std::collections::HashSet::new();
+        for account in accounts {
+            if account.id.is_empty() || !seen.insert(account.id.clone()) {
+                bail!("同步账号编号无效或重复");
+            }
+            if !account.email.contains('@') || account.email.trim().is_empty() {
+                bail!("同步账号邮箱无效");
+            }
+            if account.project_id.chars().count() > 200 {
+                bail!("同步项目编号过长");
+            }
+        }
+        let connection = self.connection.lock().unwrap();
+        connection.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| -> Result<()> {
+            let value: String =
+                connection.query_row("SELECT value FROM settings WHERE id=1", [], |row| {
+                    row.get(0)
+                })?;
+            let mut settings: Settings = serde_json::from_str(&value)?;
+            settings.max_concurrent = max_concurrent;
+            settings.image_timeout_seconds = image_timeout_seconds;
+            settings.video_timeout_seconds = video_timeout_seconds;
+            self.write_settings(&connection, &settings)?;
+            let mut statement = connection.prepare("SELECT value FROM accounts")?;
+            let existing: Vec<Account> = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .map(|row| Ok(serde_json::from_str(&row?)?))
+                .collect::<Result<_>>()?;
+            drop(statement);
+            for synced in accounts {
+                let mut account = existing
+                    .iter()
+                    .find(|item| item.id == synced.id)
+                    .cloned()
+                    .unwrap_or_else(|| Account {
+                        id: synced.id.clone(),
+                        email: String::new(),
+                        enabled: true,
+                        project_id: String::new(),
+                        last_synced: None,
+                        credits: None,
+                        browser_data_dir: String::new(),
+                        browser_profile: String::new(),
+                    });
+                if account.email != synced.email {
+                    account.last_synced = None;
+                    account.credits = None;
+                }
+                account.email = synced.email.trim().into();
+                account.enabled = synced.enabled;
+                account.project_id = synced.project_id.clone();
+                connection.execute(
+                    "INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+                    params![account.id, serde_json::to_string(&account)?],
+                )?;
+            }
+            Ok(())
+        })();
+        if result.is_ok() {
+            connection.execute_batch("COMMIT")?;
+        } else {
+            let _ = connection.execute_batch("ROLLBACK");
+        }
+        result
+    }
+    fn write_settings(&self, connection: &Connection, settings: &Settings) -> Result<()> {
         if settings.port == 0
             || settings.max_concurrent == 0
             || settings.max_concurrent > 8
@@ -97,7 +176,10 @@ impl Store {
                 bail!("代理地址必须为 HTTP(S)/SOCKS5 URL");
             }
         }
-        self.connection.lock().unwrap().execute("INSERT INTO settings(id,value) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET value=excluded.value", [serde_json::to_string(settings)?])?;
+        connection.execute(
+            "INSERT INTO settings(id,value) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+            [serde_json::to_string(settings)?],
+        )?;
         Ok(())
     }
     pub fn accounts(&self) -> Result<Vec<Account>> {

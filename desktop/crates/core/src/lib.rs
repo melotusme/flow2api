@@ -10,6 +10,7 @@ mod request;
 pub mod resolver;
 pub mod store;
 mod video;
+pub mod webdav;
 
 use anyhow::{bail, Result};
 use model::*;

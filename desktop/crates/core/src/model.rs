@@ -31,6 +31,14 @@ impl Default for Settings {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct SyncedAccount {
+    pub id: String,
+    pub email: String,
+    pub enabled: bool,
+    pub project_id: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Account {
     pub id: String,
