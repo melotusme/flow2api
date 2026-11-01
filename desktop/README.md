@@ -99,7 +99,7 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 上游源码仓库是公开的 `TheSmallHanCat/flow2api`。当前账号不能向它推送，所以发布构建读取公开 fork `melotusme/flow2api` 上的同一套提交。安装包只发布到私有 `melotusme/flow2api-releases`，Homebrew tap 是私有 `melotusme/homebrew-flow2api`。审阅用流程在 `.github/release-workflow.yml`，执行副本在发布仓库的 `.github/workflows/release.yml`，只接受手动触发。签名私钥在仓库外的 `~/.local/share/flow2api/signing/`，并作为发布仓库 Secret `TAURI_SIGNING_PRIVATE_KEY`。更新签名不是 Apple 公证，也不是 Windows Authenticode。macOS 使用 ad-hoc 签名。Windows 只有 x64 安装包，没有原生 ARM64。
 
-源码提交到远程并且两个平台都构建成功之后，才运行发布仓库的 Publish signed release。缺一个平台不能成为 latest。tap 里目前只有下载策略和 `scripts/update-cask.py`，没有 cask。第一次正式发布后，在 tap 仓库执行 `python3 scripts/update-cask.py`，核对生成的 `Casks/flow2api.rb` 再提交。在那之前 `brew install --cask` 找不到配方。
+源码提交到远程并且两个平台都构建成功之后，才运行发布仓库的 Publish signed release。缺一个平台不能成为 latest。`v0.2.0` 已正式发布并同步更新 tap 仓库 `Casks/flow2api.rb`（后续新版本发布后，在 tap 仓库执行 `python3 scripts/update-cask.py` 更新校验值并提交）。
 
 macOS，在已有正式 Release 之后：
 
