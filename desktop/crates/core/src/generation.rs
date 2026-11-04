@@ -81,7 +81,7 @@ impl App {
         }
         let mut account = self.store.account(id)?;
         let settings = self.store.settings()?;
-        let session = self
+        let session = match self
             .browsers
             .session(
                 id,
@@ -90,7 +90,17 @@ impl App {
                 &account.browser_data_dir,
                 &account.browser_profile,
             )
-            .await?;
+            .await
+        {
+            Ok(s) => s,
+            Err(e) if !account.browser_data_dir.is_empty() => {
+                bail!(
+                    "{}。若日常 Chrome 正在运行，请在账号卡片中点击「改为独立登录」或通过 Chrome 扩展「同步到 Flow2API」，无需退出日常浏览器。",
+                    e
+                );
+            }
+            Err(e) => return Err(e),
+        };
         let mut session = session.lock().await;
         self.verify_login(&mut session, &mut account).await?;
         let credits = flow::rpc(&mut session, "nzlxg", json!([]), None).await?;
@@ -248,20 +258,16 @@ impl App {
             .map(|a| a.id.clone())
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let settings = self.store.settings()?;
+        // Cookie sync injects cookies into Flow2API's dedicated standalone profile so that
+        // it never locks or conflicts with everyday Chrome instances.
         let session = self
             .browsers
             .session(
                 &id,
                 &settings.browser_executable,
                 &settings.proxy_url,
-                existing
-                    .as_ref()
-                    .map(|a| a.browser_data_dir.as_str())
-                    .unwrap_or(""),
-                existing
-                    .as_ref()
-                    .map(|a| a.browser_profile.as_str())
-                    .unwrap_or(""),
+                "",
+                "",
             )
             .await?;
 
@@ -303,6 +309,8 @@ impl App {
             Some(mut acc) => {
                 acc.credits = credits;
                 acc.last_synced = Some(now());
+                acc.browser_data_dir = String::new();
+                acc.browser_profile = String::new();
                 acc
             }
             None => Account {

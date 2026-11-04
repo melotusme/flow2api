@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.2.2';
+const APP_VERSION='0.2.3';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio'};
