@@ -18,10 +18,20 @@ pub fn validate(request: &GenerationRequest) -> Result<Value> {
     if request.images.len() < capabilities["min_images"].as_u64().unwrap_or(0) as usize
         || request.images.len() > capabilities["max_images"].as_u64().unwrap_or(0) as usize
     {
-        bail!("参考图数量与模型要求不符");
+        bail!(
+            "当前用途需要 {}–{} 张参考图，已提供 {} 张；请调整参考图或切换用途",
+            capabilities["min_images"],
+            capabilities["max_images"],
+            request.images.len()
+        );
     }
     if capabilities["requires_video_id"] == true
-        && request.video_id.as_deref().unwrap_or_default().is_empty()
+        && request
+            .video_id
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
     {
         bail!("请填写续写所需的源视频 ID");
     }
@@ -29,6 +39,38 @@ pub fn validate(request: &GenerationRequest) -> Result<Value> {
 }
 
 impl App {
+    pub async fn media_reference(&self, filename: &str) -> Result<String> {
+        let media = self
+            .store
+            .media()?
+            .into_iter()
+            .find(|m| m.filename == filename)
+            .context("作品不存在，请刷新作品库")?;
+        if media.kind != "image"
+            || std::path::Path::new(filename)
+                .file_name()
+                .and_then(|s| s.to_str())
+                != Some(filename)
+        {
+            bail!("请选择本机图片作品作为参考图");
+        }
+        let root = self.store.root.join("generated").canonicalize()?;
+        let path = root.join(filename).canonicalize()?;
+        if !path.starts_with(&root) || tokio::fs::metadata(&path).await?.len() > 20 * 1024 * 1024 {
+            bail!("参考图无法读取或超过 20 MB，请选择较小的图片");
+        }
+        let bytes = tokio::fs::read(path).await?;
+        if bytes.len() > 20 * 1024 * 1024 {
+            bail!("参考图超过 20 MB");
+        }
+        let mime = match media_extension(&bytes, "image")? {
+            "jpg" => "image/jpeg",
+            "png" => "image/png",
+            "webp" => "image/webp",
+            _ => "image/gif",
+        };
+        Ok(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
+    }
     pub(crate) async fn verify_login(
         &self,
         session: &mut Session,
@@ -216,8 +258,13 @@ impl App {
         if self.status().service != "running" {
             bail!("请先启动 API 服务");
         }
+        request.prompt = request.prompt.trim().to_owned();
+        request.video_id = request
+            .video_id
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty());
         validate(&request)?;
-        if self.status().queued > 128 {
+        if self.status().queued >= 128 {
             bail!("排队任务过多，请稍后提交");
         }
         let accounts = self.store.accounts()?;
@@ -229,7 +276,7 @@ impl App {
                     && (!a.browser_bridge || self.bridge.ready(&a.id))
             }),
             None => {
-                let tasks = self.store.tasks()?;
+                let tasks = self.store.task_summaries()?;
                 accounts
                     .into_iter()
                     .filter(|a| {
@@ -272,6 +319,24 @@ impl App {
         });
         Ok(task)
     }
+    pub async fn cancel_task(&self, id: &str) -> Result<Task> {
+        let _admission = self.job_gate.lock().await;
+        self.ensure_available()?;
+        let mut task = self.store.task(id)?;
+        if task.state == "cancelled" {
+            return Ok(task);
+        }
+        if task.state != "queued" {
+            bail!("只能取消排队任务；已经执行的任务请等待结果，避免重复扣费");
+        }
+        task.state = "cancelled".into();
+        task.stage = "已取消，未提交到 Flow".into();
+        task.error = Some("任务已在本机取消，未提交到 Flow".into());
+        task.updated_at = now();
+        self.store.save_task(&task)?;
+        self.refresh()?;
+        Ok(task)
+    }
     pub fn stage(&self, id: &str, stage: &str) -> Result<()> {
         let mut task = self.store.task(id)?;
         task.stage = stage.into();
@@ -281,15 +346,17 @@ impl App {
     }
     async fn run_task(&self, id: &str) -> Result<()> {
         let _permit = self.workers.acquire().await?;
+        let admission = self.job_gate.lock().await;
         let mut task = self.store.task(id)?;
         if task.state != "queued" {
             return Ok(());
         }
         task.state = "running".into();
-        task.stage = "连接专用 Chrome".into();
+        task.stage = "等待账号浏览器就绪".into();
         task.updated_at = now();
         self.store.save_task(&task)?;
         self.refresh()?;
+        drop(admission);
         let settings = self.store.settings()?;
         let model = validate(&task.request)?;
         let timeout_seconds = if model["config"]["type"] == "image" {
@@ -297,9 +364,18 @@ impl App {
         } else {
             settings.video_timeout_seconds
         };
+        let account = self
+            .store
+            .account(task.request.account_id.as_deref().context("任务缺少账号")?)?;
+        let session = self.account_session(&account).await?;
+        // Sessions serialize requests for one Google account. Waiting for another
+        // task's browser must not consume this task's generation deadline.
+        let mut session = session.lock().await;
+        // A previous task may have created the project while this one waited.
+        let mut account = self.store.account(&account.id)?;
         let media = timeout(
             Duration::from_secs(timeout_seconds),
-            self.generate(&task, &model, &settings),
+            self.generate(&task, &model, &settings, &mut session, &mut account),
         )
         .await
         .context("生成超时，Flow 可能仍在执行；请核对上游结果后决定是否重试")??;
@@ -315,24 +391,21 @@ impl App {
         task: &Task,
         model: &Value,
         settings: &Settings,
+        session: &mut Session,
+        account: &mut Account,
     ) -> Result<Vec<Media>> {
-        let mut account = self
-            .store
-            .account(task.request.account_id.as_deref().context("任务缺少账号")?)?;
-        let session = self.account_session(&account).await?;
-        let mut session = session.lock().await;
-        self.verify_login(&mut session, &mut account).await?;
+        self.verify_login(session, account).await?;
         if account.project_id.is_empty() {
             self.stage(&task.id, "创建 Flow 项目")?;
             let payload = flow::rpc(
-                &mut session,
+                session,
                 "jHPbke",
                 json!(["projects/*", [null, ["Flow2API Desktop"]], [null, 22]]),
                 None,
             )
             .await?;
             account.project_id = flow::find_uuid(&payload, &[]).context("创建项目未返回项目 ID")?;
-            self.store.save_account(&account)?;
+            self.store.save_account(account)?;
         }
         session.project(&account.project_id, &account.email).await?;
         let mut references = vec![];
@@ -354,8 +427,7 @@ impl App {
                 uuid::Uuid::new_v4().to_string().to_uppercase(),
                 uuid::Uuid::new_v4().to_string().to_uppercase()
             ]);
-            let payload =
-                flow::rpc(&mut session, "maseQ", argument, Some(&account.project_id)).await?;
+            let payload = flow::rpc(session, "maseQ", argument, Some(&account.project_id)).await?;
             references.push(
                 flow::find_uuid(&payload, &[&account.project_id])
                     .context("参考图上传未返回媒体 ID")?,
@@ -375,8 +447,7 @@ impl App {
                 &captcha,
                 &references,
             );
-            let payload =
-                flow::rpc(&mut session, "ogiZ0b", argument, Some(&account.project_id)).await?;
+            let payload = flow::rpc(session, "ogiZ0b", argument, Some(&account.project_id)).await?;
             let items = payload[0].as_array().context("图片生成未返回媒体")?;
             let mut results = vec![];
             for item in items {
@@ -386,7 +457,7 @@ impl App {
                     self.stage(&task.id, "图片高清放大")?;
                     let captcha = session.captcha("IMAGE_GENERATION").await?;
                     let payload = flow::rpc(
-                        &mut session,
+                        session,
                         "SPrCad",
                         json!([
                             media_id,
@@ -457,9 +528,9 @@ impl App {
                 None,
             )?;
             self.stage(&task.id, "提交视频任务")?;
-            let payload = flow::rpc(&mut session, rpc, argument, Some(&account.project_id)).await?;
+            let payload = flow::rpc(session, rpc, argument, Some(&account.project_id)).await?;
             let videos = self
-                .poll_video(&mut session, task, &account.project_id, payload)
+                .poll_video(session, task, &account.project_id, payload)
                 .await?;
             let mut results = vec![];
             for video in videos {
@@ -485,8 +556,8 @@ impl App {
                         Some(resolution),
                     )?;
                     let payload =
-                        flow::rpc(&mut session, rpc, argument, Some(&account.project_id)).await?;
-                    self.poll_video(&mut session, task, &account.project_id, payload)
+                        flow::rpc(session, rpc, argument, Some(&account.project_id)).await?;
+                    self.poll_video(session, task, &account.project_id, payload)
                         .await?
                 } else {
                     vec![video]
@@ -745,6 +816,71 @@ pub fn media_extension(bytes: &[u8], kind: &str) -> Result<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn test_task(id: &str, state: &str) -> Task {
+        Task {
+            id: id.into(),
+            request: GenerationRequest {
+                model: "gemini-3.1-flash-lite-image-square".into(),
+                prompt: "test".into(),
+                images: vec!["data:image/png;base64,large-reference".into()],
+                account_id: None,
+                video_id: None,
+            },
+            state: state.into(),
+            stage: "waiting".into(),
+            created_at: now(),
+            updated_at: now(),
+            error: None,
+            results: vec![],
+        }
+    }
+    #[tokio::test]
+    async fn cancelled_queue_never_runs_and_detail_retains_references() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let app = App::open(directory.path())?;
+        let task = test_task("queued", "queued");
+        app.store.save_task(&task)?;
+        app.refresh()?;
+        assert_eq!(app.status().queued, 1);
+        assert!(app.store.task_summaries()?[0].request.images.is_empty());
+        assert_eq!(
+            app.store.task("queued")?.request.images,
+            task.request.images
+        );
+        assert!(app.store.task("missing").is_err());
+        assert_eq!(app.cancel_task("queued").await?.state, "cancelled");
+        app.run_task("queued").await?;
+        assert_eq!(app.store.task("queued")?.state, "cancelled");
+        assert_eq!(app.status().queued, 0);
+        assert_eq!(app.status().failed, 0);
+        assert_eq!(app.cancel_task("queued").await?.state, "cancelled");
+        for state in ["running", "succeeded", "failed", "interrupted"] {
+            app.store.save_task(&test_task(state, state))?;
+            assert!(app.cancel_task(state).await.is_err());
+            assert_eq!(app.store.task(state)?.state, state);
+        }
+        app.store.save_task(&test_task("race", "queued"))?;
+        let (cancel, run) = tokio::join!(app.cancel_task("race"), app.run_task("race"));
+        // Cancellation takes the shared admission lock first; no browser is opened.
+        assert!(cancel.is_ok());
+        run?;
+        assert_eq!(app.store.task("race")?.state, "cancelled");
+        Ok(())
+    }
+    #[tokio::test]
+    async fn local_reference_reads_only_registered_images() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let app = App::open(directory.path())?;
+        app.store.save_task(&test_task("source", "succeeded"))?;
+        let media = app
+            .archive_bytes(b"\x89PNG\r\n\x1a\nfixture", "image", "source", "media-id")
+            .await?;
+        let reference = app.media_reference(&media.filename).await?;
+        assert!(reference.starts_with("data:image/png;base64,"));
+        assert!(app.media_reference("../desktop.db").await.is_err());
+        assert!(app.media_reference("unknown.png").await.is_err());
+        Ok(())
+    }
     #[test]
     fn accounts_prefer_free_then_least_recently_used() {
         let account = |id: &str| Account {

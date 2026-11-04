@@ -5,6 +5,7 @@ pub mod catalog;
 pub mod flow;
 pub mod generation;
 pub mod migration;
+pub mod magpie;
 pub mod model;
 mod monitoring;
 mod request;
@@ -100,7 +101,7 @@ impl App {
         self.updates.send_replace(status.clone());
     }
     pub fn refresh(&self) -> Result<()> {
-        let tasks = self.store.tasks()?;
+        let tasks = self.store.task_summaries()?;
         let accounts = self.store.accounts()?;
         self.change_status(|s| {
             s.total_accounts = accounts.len();

@@ -42,6 +42,20 @@ async fn save_settings(state: tauri::State<'_, Desktop>, settings: Settings) -> 
     result(&state.core, state.core.save_settings(settings).await)
 }
 #[tauri::command]
+fn magpie_status(state: tauri::State<Desktop>) -> Result<flow2api_core::magpie::Connection, String> {
+    let path = flow2api_core::magpie::config_path().map_err(|e| e.to_string())?;
+    flow2api_core::magpie::inspect(&path, &state.core.store.settings().map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn connect_magpie(state: tauri::State<'_, Desktop>) -> Result<flow2api_core::magpie::Connection, String> {
+    result(&state.core, state.core.start_service().await)?;
+    let _gate = state.core.job_gate.lock().await;
+    let path = flow2api_core::magpie::config_path().map_err(|e| e.to_string())?;
+    let settings = state.core.store.settings().map_err(|e| e.to_string())?;
+    flow2api_core::magpie::connect(&path, &settings).map_err(|e| e.to_string())
+}
+#[tauri::command]
 async fn start_service(state: tauri::State<'_, Desktop>) -> Result<Status, String> {
     result(&state.core, state.core.start_service().await)
 }
@@ -246,7 +260,15 @@ async fn sync_account(state: tauri::State<'_, Desktop>, id: String) -> Result<Ac
 }
 #[tauri::command]
 fn tasks(state: tauri::State<Desktop>) -> Result<Vec<Task>, String> {
-    result(&state.core, state.core.store.tasks())
+    result(&state.core, state.core.store.task_summaries())
+}
+#[tauri::command]
+fn task_detail(state: tauri::State<Desktop>, id: String) -> Result<Task, String> {
+    result(&state.core, state.core.store.task(&id))
+}
+#[tauri::command]
+async fn cancel_task(state: tauri::State<'_, Desktop>, id: String) -> Result<Task, String> {
+    result(&state.core, state.core.cancel_task(&id).await)
 }
 #[tauri::command]
 async fn submit(
@@ -258,6 +280,13 @@ async fn submit(
 #[tauri::command]
 fn library(state: tauri::State<Desktop>) -> Result<Vec<Media>, String> {
     result(&state.core, state.core.store.media())
+}
+#[tauri::command]
+async fn media_reference(
+    state: tauri::State<'_, Desktop>,
+    filename: String,
+) -> Result<String, String> {
+    result(&state.core, state.core.media_reference(&filename).await)
 }
 #[tauri::command]
 async fn choose_legacy_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
@@ -761,6 +790,8 @@ pub fn run() {
             status,
             settings,
             save_settings,
+            magpie_status,
+            connect_magpie,
             start_service,
             stop_service,
             models,
@@ -777,8 +808,11 @@ pub fn run() {
             browser_pairing_code,
             open_flow_page,
             tasks,
+            task_detail,
+            cancel_task,
             submit,
             library,
+            media_reference,
             choose_legacy_directory,
             preview_legacy,
             import_legacy,

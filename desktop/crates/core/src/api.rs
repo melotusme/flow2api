@@ -782,14 +782,33 @@ mod tests {
             error: Some("upstream rejected".into()),
             results: vec![],
         };
-        app.store.save_task(&task)?;
-        let response = openai_stream(app, task);
-        assert_eq!(response.status(), 200);
-        let body = axum::body::to_bytes(response.into_body(), 1_000_000).await?;
-        let text = String::from_utf8(body.to_vec())?;
-        assert!(text.contains("upstream rejected"));
-        assert!(!text.contains("[DONE]"));
-        assert!(!text.contains("\"finish_reason\":\"stop\""));
+        for state in ["failed", "cancelled"] {
+            let mut terminal = task.clone();
+            terminal.state = state.into();
+            terminal.error = Some(
+                if state == "cancelled" {
+                    "任务已在本机取消，未提交到 Flow"
+                } else {
+                    "upstream rejected"
+                }
+                .into(),
+            );
+            app.store.save_task(&terminal)?;
+            let response = openai_stream(app.clone(), terminal.clone());
+            assert_eq!(response.status(), 200);
+            let body = axum::body::to_bytes(response.into_body(), 1_000_000).await?;
+            let text = String::from_utf8(body.to_vec())?;
+            assert!(text.contains(terminal.error.as_deref().unwrap()));
+            assert!(!text.contains("[DONE]"));
+            assert!(!text.contains("\"finish_reason\":\"stop\""));
+            assert_eq!(
+                wait_task(&app, &terminal.id)
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error.1))?
+                    .state,
+                state
+            );
+        }
         Ok(())
     }
 

@@ -3,8 +3,8 @@
 const APP_VERSION='0.3.0';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
-const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[]};
-const labels = {queued:'排队中',running:'生成中',succeeded:'已保存',failed:'失败',interrupted:'已中断',archived:'旧版已完成'};
+const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
+const labels = {queued:'排队中',running:'生成中',succeeded:'已保存',failed:'失败',interrupted:'已中断',cancelled:'已取消',archived:'旧版已完成'};
 const titles = {studio:'创作工作台',tasks:'任务与进度',library:'本机作品',accounts:'Google 账号',settings:'设置与接入'};
 let noticeTimer;
 
@@ -220,6 +220,7 @@ function page(name,{focus=true}={}){
     else element.removeAttribute('aria-current');
   });
   $('page-title').textContent=titles[name];
+  document.title=titles[name]+' · Flow2API';
   if(focus)$('page-title').focus({preventScroll:true});
 }
 page(state.page,{focus:false});
@@ -242,58 +243,168 @@ function updateStatus(status){
   $('data-path').textContent=status.data_dir;
   $('browser-status').textContent=status.browser;
   if(status.address)$('base-url').textContent=status.address+'/v1';
-  $('generate').disabled=!running;
+  updateReadiness();
   if(status.last_error&&status.service==='failed')notice(status.last_error,true);
 }
 
 function selectedModel(){return state.models.find(model=>model.id===$('model').value)}
+const kindLabels={image:'文生图 / 参考图编辑',t2v:'文字生成视频',omni:'文字 / 参考图视频',i2v:'首帧 / 首尾帧视频',r2v:'多参考图视频',extend:'续写已有视频'};
+const pickerIds={type:'model-type',family:'model-family',kind:'model-kind',aspect_ratio:'model-ratio',spec:'model-spec'};
+function pickerLabel(field,value){
+  if(field==='type')return value==='image'?'图片':'视频';
+  if(field==='kind')return kindLabels[value]||value;
+  if(field==='spec')return $('model-type').value==='video'?value+' 秒':value==='基础'?'基础（默认）':value;
+  return value;
+}
+function applyPicker(wanted){
+  const result=FlowStudio.choices(state.models,wanted);
+  for(const [field,id]of Object.entries(pickerIds)){
+    const select=$(id);
+    select.replaceChildren(...result.options[field].map(value=>{
+      const option=node('option',pickerLabel(field,value));option.value=value;return option;
+    }));
+    select.value=result.selected[field];
+  }
+  $('kind-field').hidden=result.options.kind.length<2;
+  $('spec-label').textContent=result.selected.type==='image'?'清晰度':'时长';
+  $('model').value=result.model?.id||'';
+  modelInfo();
+}
 function modelInfo(){
   const model=selectedModel();
   if(!model)return;
   const c=model.capabilities;
-  $('model-info').textContent=`${c.family} · ${c.aspect_ratio}${c.duration_seconds?' · '+c.duration_seconds+' 秒':''} · ${c.summary}`;
+  $('model-info').textContent=c.summary;
   $('video-field').hidden=!c.requires_video_id;
   const price=c.pricing;
   $('model-price').textContent=price.credits===null?'此规格费用未核价，以账号实际扣费为准':`${price.verified_at} 参考：${price.credits} credits / ${price.unit}，以实际扣费为准`;
-  $('images').disabled=!c.supports_images;
+  $('images').disabled=!c.supports_images||state.loadingImages;
+  $('reference-hint').textContent=c.supports_images?`支持 ${c.min_images}–${c.max_images} 张，每张不超过 20 MB。${c.kind==='i2v'?'第 1 张为首帧，第 2 张为尾帧。':''}`:`此用途不上传参考图。${state.images.length?'已选图片暂时保留，切回图片用途可继续使用。':''}`;
+  renderReferences();
 }
 function renderModels(){
-  const select=$('model');
-  const previous=select.value;
-  select.replaceChildren();
-  for(const model of state.models){
-    const c=model.capabilities;
-    const option=node('option',`${c.family} · ${c.aspect_ratio} · ${c.type==='image'?c.resolution:c.duration_seconds+' 秒'}${c.kind==='extend'?' · 续写':''}${c.kind==='i2v'?' · 首尾帧':''}${c.kind==='r2v'?' · 参考图':''}`);
-    option.value=model.id;
-    select.append(option);
-  }
-  if(state.models.some(m=>m.id===previous))select.value=previous;
-  else select.value='gemini-3.1-flash-lite-image-square';
-  modelInfo();
+  $('model').replaceChildren(...state.models.map(model=>{const option=node('option',model.id);option.value=model.id;return option;}));
+  const initial=state.models.find(m=>m.id===draft.model)||state.models.find(m=>m.id==='gemini-3.1-flash-lite-image-square')||state.models[0];
+  if(initial)applyPicker(FlowStudio.selection(initial));
 }
-$('model').onchange=modelInfo;
+for(const id of Object.values(pickerIds))$(id).onchange=()=>{
+  const wanted=Object.fromEntries(Object.entries(pickerIds).map(([field,key])=>[field,$(key).value]));
+  applyPicker(wanted);saveDraft();clearComposeError();
+};
 
-function fillStudioFromRecord(promptText,modelId,videoId){
-  if(modelId&&state.models.some(m=>m.id===modelId)){
-    $('model').value=modelId;
-    modelInfo();
-  }
-  if(promptText){
-    $('prompt').value=promptText;
-  }
-  if(videoId){
-    const current=selectedModel();
-    if(!current?.capabilities?.requires_video_id){
-      const extendModel=state.models.find(m=>m.capabilities?.requires_video_id);
-      if(extendModel){
-        $('model').value=extendModel.id;
-        modelInfo();
-      }
-    }
-    $('video-id').value=videoId;
-  }
-  page('studio');
-  $('prompt').focus();
+function studioRequest(){
+  const model=selectedModel();
+  return {model:model?.id||'',prompt:$('prompt').value.trim(),images:model?.capabilities.supports_images?[...state.images]:[],account_id:$('account').value||null,video_id:model?.capabilities.requires_video_id?$('video-id').value.trim()||null:null};
+}
+function clearComposeError(){
+  $('compose-error').hidden=true;
+  for(const id of ['prompt','images','video-id','model-family']){$(id).removeAttribute('aria-invalid');$(id).removeAttribute('aria-errormessage');}
+}
+function showComposeError(error){
+  $('compose-error').textContent=error.message;$('compose-error').hidden=false;
+  $(error.field).setAttribute('aria-invalid','true');
+  $(error.field).setAttribute('aria-errormessage','compose-error');
+  $(error.field).focus();
+}
+function updateReadiness(){
+  const running=state.status?.service==='running';
+  const ready=state.accounts.filter(accountReady);
+  const chosen=$('account').value;
+  let title='可以开始创作',detail=ready.length===1?`使用 ${ready[0].email}，作品自动保存到本机。`:`${ready.length} 个账号就绪，自动选择空闲账号。`,actionText='';
+  if(!running){title=state.status?.service==='failed'?'本机 API 启动失败':'本机 API 尚未启动';detail=state.status?.last_error||'启动后即可连接浏览器并创作。';actionText='启动 API';}
+  else if(!ready.length){title='先连接 Flow 账号';detail='在 Google 账号页完成连接，保留 Flow 标签页打开后即可创作。';actionText='连接账号';}
+  else if(chosen&&!ready.some(a=>a.id===chosen)){title='所选账号暂不可用';detail='重新连接该账号，或切换为自动选择就绪账号。';actionText='检查账号';}
+  if(state.loadingImages){title='正在读取参考图';detail='图片准备好后即可提交。';}
+  $('readiness-title').textContent=title;$('readiness-detail').textContent=detail;
+  $('readiness').classList.toggle('ready',running&&ready.length>0&&(!chosen||ready.some(a=>a.id===chosen)));
+  $('readiness-action').hidden=!actionText;$('readiness-action').textContent=actionText;
+  $('generate').disabled=state.submitting||state.loadingImages||!running||!ready.length||Boolean(chosen&&!ready.some(a=>a.id===chosen));
+  $('generate').textContent=state.submitting?'正在提交…':'开始创作 ↗';
+}
+$('readiness-action').onclick=()=>action($('readiness-action'),async()=>{
+  if(state.status?.service!=='running'){await invoke('start_service');await refresh();}
+  else page('accounts');
+});
+$('back-to-studio').onclick=()=>page('studio');
+
+const DRAFT_KEY='flow-desktop-draft:v1';
+let draft={};
+try{draft=JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')||{};}catch{/* fresh draft */}
+let draftDB=null,referenceRevision=0;
+function saveDraft(){
+  draft={model:$('model').value,prompt:$('prompt').value,account_id:$('account').value,video_id:$('video-id').value};
+  try{localStorage.setItem(DRAFT_KEY,JSON.stringify(draft));$('draft-status').textContent='草稿已保存在本机';}
+  catch{$('draft-status').textContent='草稿保存失败：本机存储不可用，请复制描述保留。';}
+}
+function referenceDatabase(){
+  if(!draftDB)draftDB=new Promise((resolve,reject)=>{
+    const request=indexedDB.open('flow-desktop-drafts',1);
+    request.onupgradeneeded=()=>request.result.createObjectStore('references');
+    request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+  });
+  return draftDB;
+}
+async function saveReferences(){
+  const revision=++referenceRevision,images=[...state.images];
+  try{
+    const db=await referenceDatabase();
+    // A newer change owns the draft if the database was still opening.
+    if(revision!==referenceRevision)return;
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('references','readwrite');tx.objectStore('references').put(images,'current');
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+  }catch{$('draft-status').textContent='参考图未能保存到草稿，重开应用后需重新选择。';}
+}
+async function restoreDraft(){
+  $('prompt').value=typeof draft.prompt==='string'?draft.prompt:'';
+  $('video-id').value=typeof draft.video_id==='string'?draft.video_id:'';
+  try{
+    const db=await referenceDatabase();
+    const images=await new Promise((resolve,reject)=>{
+      const req=db.transaction('references').objectStore('references').get('current');
+      req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+    });
+    if(Array.isArray(images))state.images=images.filter(x=>typeof x==='string'&&x.startsWith('data:image/'));
+  }catch{$('draft-status').textContent='参考图草稿不可用，请重新选择图片。';}
+  renderReferences();
+}
+for(const id of ['prompt','video-id'])$(id).oninput=()=>{saveDraft();clearComposeError();};
+$('account').onchange=()=>{saveDraft();updateReadiness();};
+$('prompt').onkeydown=event=>{
+  if((event.ctrlKey||event.metaKey)&&event.key==='Enter'&&!event.isComposing){event.preventDefault();if(!$('generate').disabled)$('generate').click();}
+};
+$('prompt').placeholder+='（⌘ / Ctrl + Enter 提交）';
+$('clear-draft').onclick=async()=>{
+  if(($('prompt').value||state.images.length||$('video-id').value)&&!confirm('清空当前描述、参考图和源视频？已生成的作品不会删除。'))return;
+  $('prompt').value='';$('video-id').value='';state.images=[];$('images').value='';clearComposeError();renderReferences();saveDraft();await saveReferences();
+};
+function renderReferences(){
+  $('references').replaceChildren(...state.images.map((source,index)=>{
+    const item=node('div',undefined,'reference-item'),image=node('img');image.src=source;image.alt=`参考图 ${index+1}`;
+    const remove=button(`移除第 ${index+1} 张`,async()=>{state.images.splice(index,1);renderReferences();saveDraft();await saveReferences();modelInfo();clearComposeError();});
+    item.append(image,remove);return item;
+  }));
+}
+async function fillStudioFromRecord(promptText,modelId,videoId,request=null){
+  if(($('prompt').value||state.images.length||$('video-id').value)&&!confirm('用这条记录替换当前草稿？'))return;
+  let model=state.models.find(m=>m.id===modelId);
+  if(videoId)model=state.models.find(m=>m.capabilities.requires_video_id&&m.capabilities.family===model?.capabilities.family)||state.models.find(m=>m.capabilities.requires_video_id);
+  if(model)applyPicker(FlowStudio.selection(model));
+  $('prompt').value=promptText||'';$('video-id').value=videoId||'';
+  state.images=request?.images?[...request.images]:[];
+  $('images').value='';
+  $('account').value=request?.account_id&&state.accounts.some(a=>a.id===request.account_id)?request.account_id:'';
+  modelInfo();saveDraft();await saveReferences();clearComposeError();page('studio');$('prompt').focus();updateReadiness();
+}
+async function editTask(task){
+  const full=await invoke('task_detail',{id:task.id});
+  await fillStudioFromRecord(full.request.prompt,full.request.model,full.request.video_id,full.request);
+}
+function expandablePrompt(text){
+  const details=node('details',undefined,'prompt-details');
+  details.append(node('summary',text.length>90?text.slice(0,90)+'…（展开完整描述）':text),node('p',text,'full-prompt'));
+  return details;
 }
 
 function taskCard(task){
@@ -303,18 +414,20 @@ function taskCard(task){
     node('span',labels[task.state]||task.state,'state '+task.state),
     node('small',`${task.request.model} · ${new Date(task.created_at).toLocaleString()}`)
   );
-  card.append(header,node('div',task.request.prompt,'prompt'),node('div',task.stage,'task-stage'));
+  card.append(header,expandablePrompt(task.request.prompt),node('div',task.stage,'task-stage'));
+  if(task.state==='running')card.append(node('small','执行中任务无法撤回；超时或失败后请先核对 Flow 结果，再决定是否重新提交。'));
   if(task.error)card.append(node('p',task.error,'task-error'));
   const actions=node('div',undefined,'task-actions');
   for(const media of task.results||[]){
     actions.append(button(media.kind==='image'?'打开图片 ↗':'打开视频 ↗',()=>invoke('open_media',{filename:media.filename})));
     if(media.kind==='video'&&media.media_id){
-      actions.append(button('一键续写 ↗',()=>fillStudioFromRecord(task.request.prompt,null,media.media_id)));
+      actions.append(button('一键续写 ↗',()=>fillStudioFromRecord(task.request.prompt,task.request.model,media.media_id,{...task.request,images:[]})));
     }
   }
   if(task.request.prompt){
-    actions.append(button('填入工作台',()=>fillStudioFromRecord(task.request.prompt,task.request.model,task.request.video_id)));
+    actions.append(button(['failed','interrupted','cancelled'].includes(task.state)?'再次编辑后重试':'再次编辑',()=>editTask(task)));
   }
+  if(task.state==='queued')actions.prepend(button('取消排队',async()=>{await invoke('cancel_task',{id:task.id});await refresh();notice('已取消排队，未提交到 Flow。');}));
   if(actions.children.length)card.append(actions);
   return card;
 }
@@ -331,6 +444,7 @@ const tasksView=createListView({
     {value:'succeeded',label:'已保存'},
     {value:'failed',label:'失败'},
     {value:'interrupted',label:'已中断'},
+    {value:'cancelled',label:'已取消'},
     {value:'archived',label:'旧版已完成'},
   ],
   matchFilter:(task,filter)=>task.state===filter,
@@ -348,10 +462,17 @@ const tasksView=createListView({
 });
 
 function renderTasks(){
-  const recent=$('recent-tasks');
-  recent.className='';
-  recent.replaceChildren(...state.tasks.slice(0,3).map(taskCard));
-  if(!state.tasks.length)recent.append(node('div','提交后在这里查看生成进度。','empty'));
+  const current=state.tasks.find(t=>t.id===state.activeTaskId)||state.tasks.find(t=>['running','queued'].includes(t.state))||state.tasks[0];
+  const key=JSON.stringify([current,state.status?.address]);
+  if(key!==state.monitorKey){
+    state.monitorKey=key;
+    const recent=$('recent-tasks');recent.className='';recent.replaceChildren();
+    if(current){
+      recent.append(taskCard(current));
+      const media=current.results?.[0];
+      if(media){recent.prepend(mediaCard(media));if(current.results.length>1)recent.append(button(`查看全部 ${current.results.length} 个作品`,()=>page('library')));}
+    }else recent.append(node('div','从左侧描述开始。提交后在这里查看进度与作品。','empty'));
+  }
   tasksView.update(state.tasks);
 }
 
@@ -423,18 +544,21 @@ function accountCard(account){
       await invoke('save_account',{id:account.id,email:account.email,enabled:!account.enabled});
       await refresh();
     }),
-    button('选择已有登录资料',()=>chooseAccountProfile(account)),
+    ...(!account.browser_bridge?[button('选择已有登录资料',()=>chooseAccountProfile(account)),
     button('改为独立登录',async()=>{
       await invoke('configure_account_browser',{id:account.id,dataDir:'',profile:''});
       await refresh();
       notice('已切换独立资料，请打开登录窗口完成登录。');
-    }),
-    button('删除',async()=>{
+    })]:[]),
+    button('删除账号',async()=>{
       if(!confirm('删除该账号的应用登记？浏览器资料会保留在本机。'))return;
       await invoke('delete_account',{id:account.id});
       await refresh();
-    })
+    },'danger')
   );
+  const more=node('details',undefined,'account-more');more.append(node('summary','更多操作'));
+  const secondary=node('div');while(actions.children.length>2)secondary.append(actions.children[2]);
+  if(secondary.children.length){more.append(secondary);actions.append(more);}
   row.append(info,actions);
   return row;
 }
@@ -465,22 +589,22 @@ const accountsView=createListView({
   defaultOrder:'asc',
   emptyText:'打开 Flow 页面，获取连接码并在页面连接当前账号。',
   noMatchText:'没有匹配当前筛选条件的 Google 账号。',
-  revisionKey:items=>items,
+  revisionKey:items=>[items,state.connections],
   renderItem:accountCard,
 });
 
 function renderAccounts(){
   const select=$('account');
-  const previous=select.value;
-  select.replaceChildren(node('option','自动分配已登录账号'));
-  select.firstChild.value='';
-  for(const account of state.accounts.filter(accountReady)){
-    const option=node('option',account.email);
-    option.value=account.id;
-    select.append(option);
+  const previous=select.value||draft.account_id||'';
+  const signature=JSON.stringify(state.accounts.map(a=>[a.id,a.email,accountReady(a)]));
+  if(select.dataset.signature!==signature){
+    select.dataset.signature=signature;
+    const automatic=node('option','自动选择就绪账号');automatic.value='';
+    select.replaceChildren(automatic,...state.accounts.map(account=>{const option=node('option',account.email+(accountReady(account)?'':' · 未就绪'));option.value=account.id;return option;}));
+    select.value=state.accounts.some(a=>a.id===previous)?previous:'';
   }
-  select.value=previous;
-  accountsView.update(state.accounts);
+  accountsView.update(state.accounts);updateReadiness();
+  $('account').closest('label').hidden=state.accounts.length<2;
 }
 
 const preferredEmails=['account1@example.com','account2@example.com','account3@example.com'];
@@ -504,9 +628,11 @@ function mediaCard(media){
       preview.loading='lazy';
     }
   }
+  if(!state.status?.address)preview.hidden=true;
   const info=node('div');
+  if(!state.status?.address)info.append(node('p','启动本机 API 可预览；仍可打开本机文件。','hint'));
   info.append(node('small',`${media.kind==='image'?'图片':'视频'} · ${(media.size/1024/1024).toFixed(1)} MB · ${new Date(media.created_at).toLocaleString()}`));
-  if(media.prompt)info.append(node('p',media.prompt,'prompt'));
+  if(media.prompt)info.append(expandablePrompt(media.prompt));
   const actions=node('div',undefined,'actions');
   actions.append(
     button('打开文件 ↗',()=>invoke('open_media',{filename:media.filename})),
@@ -518,10 +644,19 @@ function mediaCard(media){
   if(media.prompt||media.model){
     actions.append(button('填入工作台',()=>fillStudioFromRecord(media.prompt,media.model,null)));
   }
+  if(media.kind==='image')actions.append(button('用作参考图',async()=>{
+    const source=await invoke('media_reference',{filename:media.filename});
+    if(!selectedModel()?.capabilities.supports_images){
+      const model=state.models.find(m=>m.id==='gemini-3.1-flash-lite-image-square');if(model)applyPicker(FlowStudio.selection(model));
+    }
+    const max=selectedModel()?.capabilities.max_images||0;
+    if(state.images.length>=max)throw Error(`当前模型最多支持 ${max} 张参考图，请先移除不需要的图片。`);
+    state.images.push(source);renderReferences();saveDraft();await saveReferences();page('studio');notice('已加入参考图，填写修改要求后即可生成。');
+  }));
   if(media.media_id){
     actions.append(button('复制 media ID',()=>copy(media.media_id)));
     if(media.kind==='video'){
-      actions.append(button('一键续写 ↗',()=>fillStudioFromRecord(media.prompt,null,media.media_id),'primary'));
+      actions.append(button('一键续写 ↗',()=>fillStudioFromRecord(media.prompt,media.model,media.media_id,{account_id:state.tasks.find(t=>t.id===media.task_id)?.request.account_id,images:[]}),'primary'));
     }
   }
   info.append(actions);
@@ -565,6 +700,16 @@ async function reloadSettings(){
     if(input)input.value=value;
   }
   $('base-url').textContent=`http://127.0.0.1:${state.settings.port}/v1`;
+  await loadMagpie();
+}
+
+async function loadMagpie(){
+  try{
+    const info=await invoke('magpie_status');
+    $('magpie-status').textContent=info.configured
+      ?`已接入 Magpie · ${info.models} 个图片规格 · ${info.base_url}`
+      :'尚未接入当前设置，或端口 / Key 已变更。点击一键接入即可更新。';
+  }catch(error){$('magpie-status').textContent=String(error);}
 }
 
 async function refresh(){
@@ -630,42 +775,34 @@ $('add-account').onsubmit=event=>{
 };
 
 $('images').onchange=async()=>{
+  const files=[...$('images').files];
+  if(!files.length)return;
+  state.loadingImages=true;updateReadiness();
   try{
-    const files=[...$('images').files];
     const max=selectedModel()?.capabilities.max_images||0;
-    if(files.length>max)throw Error(`当前模型最多支持 ${max} 张参考图`);
+    if(state.images.length+files.length>max)throw Error(`当前模型最多支持 ${max} 张参考图。请先移除不需要的图片。`);
+    if(files.some(file=>!['image/png','image/jpeg','image/webp'].includes(file.type)))throw Error('请选择 PNG、JPEG 或 WebP 图片。');
     if(files.some(file=>file.size>20*1024*1024))throw Error('单张参考图不能超过 20 MB');
-    state.images=await Promise.all(files.map(file=>new Promise((resolve,reject)=>{
-      const reader=new FileReader();
-      reader.onload=()=>resolve(reader.result);
-      reader.onerror=reject;
-      reader.readAsDataURL(file);
+    const images=await Promise.all(files.map(file=>new Promise((resolve,reject)=>{
+      const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('无法读取图片，请重新选择。'));reader.readAsDataURL(file);
     })));
-    $('references').replaceChildren(...state.images.map(source=>{
-      const image=node('img');
-      image.src=source;
-      image.alt='参考图';
-      return image;
-    }));
-  }catch(error){
-    state.images=[];
-    $('images').value='';
-    $('references').replaceChildren();
-    notice(error,true);
-  }
+    state.images.push(...images);renderReferences();clearComposeError();saveDraft();await saveReferences();
+  }catch(error){notice(error,true);}
+  finally{$('images').value='';state.loadingImages=false;modelInfo();updateReadiness();}
 };
 
-$('generate').onclick=()=>action($('generate'),async()=>{
-  const model=selectedModel();
-  if(!model)throw Error('请选择模型');
-  if(!state.accounts.some(accountReady)){
-    page('accounts');
-    throw Error('请先添加账号并完成登录同步');
-  }
-  await invoke('submit',{request:{model:model.id,prompt:$('prompt').value,images:state.images,account_id:$('account').value||null,video_id:$('video-id').value||null}});
-  await refresh();
-  notice('任务已提交，可以关闭窗口在后台继续执行。');
-});
+$('generate').onclick=async()=>{
+  if(state.submitting||$('generate').disabled)return;
+  clearComposeError();
+  const request=studioRequest(),error=FlowStudio.validate(request,selectedModel());
+  if(error){showComposeError(error);return;}
+  state.submitting=true;updateReadiness();
+  try{
+    const task=await invoke('submit',{request});state.activeTaskId=task.id;
+    saveDraft();await refresh();notice('任务已提交，进度和作品会显示在右侧。');
+  }catch(error){notice(error,true);}
+  finally{state.submitting=false;updateReadiness();}
+};
 
 for(const id of ['open-data','settings-open-data'])$(id).onclick=()=>action($(id),()=>invoke('open_data'));
 $('quit').onclick=()=>action($('quit'),()=>invoke('quit'));
@@ -677,6 +814,16 @@ async function copy(text){
 }
 $('copy-base').onclick=()=>action($('copy-base'),()=>copy($('base-url').textContent));
 $('copy-key').onclick=()=>action($('copy-key'),()=>copy(state.settings.api_key));
+$('connect-magpie').onclick=()=>action($('connect-magpie'),async()=>{
+  try{
+    const info=await invoke('connect_magpie');
+    await refresh();
+    $('magpie-status').textContent=`已接入 Magpie · ${info.models} 个图片规格 · ${info.base_url}。`
+      +(info.backup_path?`原配置备份：${info.backup_path}。`:'配置已是最新。')
+      +(state.status?.ready_accounts?'可以通过 hzr-flow2api-image 生成图片。':'请在 Google 账号页恢复浏览器连接后生图。');
+    notice('Magpie 接入配置已保存。');
+  }catch(error){$('magpie-status').textContent=String(error);throw error;}
+});
 
 $('settings-form').onsubmit=event=>{
   event.preventDefault();
@@ -687,6 +834,7 @@ $('settings-form').onsubmit=event=>{
     await invoke('save_settings',{settings});
     state.settings=settings;
     $('base-url').textContent=`http://127.0.0.1:${settings.port}/v1`;
+    await loadMagpie();
     await refresh();
     notice(state.status?.service==='running'?'设置已保存并自动重启 API 生效。':'设置已保存。');
   });
@@ -753,7 +901,7 @@ function showUpdateDialog(autoCheck=false){
     const title=node('h2','软件版本与更新');
     title.id='update-dialog-title';
     headingWrap.append(title,node('p',`当前运行版本：v${APP_VERSION}`,'hint'));
-    const closeBtn=button('✕',()=>dialog.close(),'quiet');
+    const closeBtn=button('关闭',()=>dialog.close(),'quiet');
     closeBtn.style.fontSize='16px';
     header.append(headingWrap,closeBtn);
 
@@ -864,11 +1012,12 @@ if($('sidebar-check-update'))$('sidebar-check-update').onclick=()=>showUpdateDia
       if(dialogStatus)dialogStatus.textContent=msg;
     });
     await reloadSettings();
+    await restoreDraft();
     state.models=(await invoke('models')).data;
     renderModels();
     $('platform').textContent=navigator.userAgent.includes('Mac')?'macOS · 菜单栏运行':'Windows · 托盘运行';
-    await loadDevice();
     await refresh();
+    loadDevice().catch(error=>notice('设备设置读取失败：'+error,true));
     let polling=false;
     setInterval(async()=>{
       if(polling)return;

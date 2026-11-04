@@ -263,11 +263,16 @@ impl Store {
         tasks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(tasks)
     }
+    /// Keep large reference images in SQLite until a caller opens task details.
+    pub fn task_summaries(&self) -> Result<Vec<Task>> {
+        self.read_values("SELECT json_set(value, '$.request.images', json('[]')) FROM tasks ORDER BY json_extract(value, '$.created_at') DESC, id")
+    }
     pub fn task(&self, id: &str) -> Result<Task> {
-        self.tasks()?
-            .into_iter()
-            .find(|v| v.id == id)
-            .context("任务不存在")
+        let connection = self.connection.lock().unwrap();
+        let mut statement = connection.prepare("SELECT value FROM tasks WHERE id=?1")?;
+        let mut rows = statement.query([id])?;
+        let row = rows.next()?.context("任务不存在")?;
+        Ok(serde_json::from_str(&row.get::<_, String>(0)?)?)
     }
     pub fn save_task(&self, task: &Task) -> Result<()> {
         self.connection.lock().unwrap().execute("INSERT INTO tasks(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value", params![task.id, serde_json::to_string(task)?])?;
