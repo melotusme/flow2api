@@ -16,7 +16,102 @@ use tokio::{
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
-pub struct Session {
+pub enum Session {
+    Native(NativeSession),
+    Bridge(Arc<crate::bridge::Peer>),
+}
+impl Session {
+    pub async fn call(&mut self, method: &str, params: Value) -> Result<Value> {
+        match self {
+            Self::Native(s) => s.call(method, params).await,
+            Self::Bridge(_) if method == "Page.bringToFront" => Ok(Value::Null),
+            Self::Bridge(_) => bail!("当前账号连接的是默认浏览器，请直接操作 Flow 标签页"),
+        }
+    }
+    pub async fn navigate(&mut self, url: &str) -> Result<()> {
+        match self {
+            Self::Native(s) => s.navigate(url).await,
+            Self::Bridge(p) => {
+                p.request("navigate", json!({"url":url})).await?;
+                Ok(())
+            }
+        }
+    }
+    pub async fn detect_email(&mut self) -> Result<Option<String>> {
+        match self {
+            Self::Native(s) => s.detect_email().await,
+            Self::Bridge(p) => Ok(p.request("identity", Value::Null).await?["email"]
+                .as_str()
+                .map(str::to_owned)),
+        }
+    }
+    pub async fn verify_account(&mut self, email: &str) -> Result<()> {
+        match self {
+            Self::Native(s) => s.verify_account(email).await,
+            Self::Bridge(_) => {
+                if !self
+                    .detect_email()
+                    .await?
+                    .is_some_and(|e| e.eq_ignore_ascii_case(email))
+                {
+                    bail!("Flow 标签页的登录账号已切换，请重新连接当前账号");
+                }
+                Ok(())
+            }
+        }
+    }
+    pub async fn project(&mut self, id: &str, email: &str) -> Result<()> {
+        match self {
+            Self::Native(s) => s.project(id, email).await,
+            Self::Bridge(_) => {
+                uuid::Uuid::parse_str(id).context("Flow 项目 ID 格式错误")?;
+                self.navigate(&format!("https://flow.google.com/project/{id}"))
+                    .await?;
+                self.verify_account(email).await
+            }
+        }
+    }
+    pub async fn captcha(&mut self, action: &str) -> Result<String> {
+        match self {
+            Self::Native(s) => s.captcha(action).await,
+            Self::Bridge(p) => p.request("captcha", json!({"action":action})).await?["token"]
+                .as_str()
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+                .context("Flow 验证码不可用，请检查标签页"),
+        }
+    }
+    pub async fn fetch(
+        &mut self,
+        url: &str,
+        method: &str,
+        body: Option<&str>,
+        content_type: &str,
+    ) -> Result<Value> {
+        match self {
+            Self::Native(s) => s.fetch(url, method, body, content_type).await,
+            Self::Bridge(p) => {
+                p.request(
+                    "fetch",
+                    json!({"url":url,"method":method,"body":body,"content_type":content_type}),
+                )
+                .await
+            }
+        }
+    }
+    async fn reusable(&mut self) -> bool {
+        match self {
+            Self::Native(s) => s.reusable().await,
+            Self::Bridge(p) => p.online(),
+        }
+    }
+    async fn close(&mut self) {
+        if let Self::Native(s) = self {
+            s.close().await;
+        }
+    }
+}
+pub struct NativeSession {
     child: Child,
     socket: Socket,
     sequence: u64,
@@ -152,6 +247,24 @@ pub fn validate_profile(data_dir: &str, profile_name: &str) -> Result<PathBuf> {
 }
 
 impl BrowserPool {
+    pub async fn bridge_session(
+        &self,
+        id: &str,
+        peer: Arc<crate::bridge::Peer>,
+    ) -> Arc<Mutex<Session>> {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get(id) {
+            if matches!(&*session.lock().await, Session::Bridge(p) if Arc::ptr_eq(p, &peer)) {
+                return session.clone();
+            }
+        }
+        if let Some(previous) = sessions.remove(id) {
+            previous.lock().await.close().await;
+        }
+        let session = Arc::new(Mutex::new(Session::Bridge(peer)));
+        sessions.insert(id.into(), session.clone());
+        session
+    }
     pub fn new(root: PathBuf) -> Self {
         Self {
             root,
@@ -187,7 +300,7 @@ impl BrowserPool {
         } else {
             self.root.join(id)
         };
-        let mut launched = Session::launch_profile(
+        let mut launched = NativeSession::launch_profile(
             &executable(configured)?,
             &profile,
             proxy,
@@ -198,7 +311,7 @@ impl BrowserPool {
         launched
             .navigate("https://flow.google.com/projects")
             .await?;
-        let session = Arc::new(Mutex::new(launched));
+        let session = Arc::new(Mutex::new(Session::Native(launched)));
         sessions.insert(id.into(), session.clone());
         Ok(session)
     }
@@ -230,7 +343,7 @@ impl BrowserPool {
     }
 }
 
-impl Session {
+impl NativeSession {
     #[cfg(test)]
     async fn launch(executable: &Path, profile: &Path, proxy: &str) -> Result<Self> {
         Self::launch_profile(executable, profile, proxy, "", false).await
@@ -538,7 +651,7 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let executable = executable(&std::env::var("FLOW2API_TEST_BROWSER").unwrap_or_default())?;
         let profile = directory.path().join("已有资料 with spaces");
-        let mut first = Session::launch(&executable, &profile, "").await?;
+        let mut first = NativeSession::launch(&executable, &profile, "").await?;
         first
             .evaluate("localStorage.setItem('unused','test')")
             .await
@@ -547,12 +660,12 @@ mod tests {
         std::fs::write(profile.join("preserve.txt"), "preserved")?;
         validate_profile(profile.to_str().unwrap(), "Default")?;
         let mut second =
-            Session::launch_profile(&executable, &profile, "", "Default", true).await?;
+            NativeSession::launch_profile(&executable, &profile, "", "Default", true).await?;
         assert!(second.reusable().await);
         #[cfg(unix)]
         {
             assert!(
-                Session::launch_profile(&executable, &profile, "", "Default", true)
+                NativeSession::launch_profile(&executable, &profile, "", "Default", true)
                     .await
                     .is_err()
             );
@@ -571,7 +684,7 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let executable = executable("")?;
         let profile = directory.path().join("专用 Chrome profile");
-        let mut session = Session::launch(&executable, &profile, "").await?;
+        let mut session = NativeSession::launch(&executable, &profile, "").await?;
         assert!(session.reusable().await);
         let app = crate::App::open(&directory.path().join("app-data"))?;
         let mut account = crate::model::Account {
@@ -583,18 +696,23 @@ mod tests {
             credits: None,
             browser_data_dir: String::new(),
             browser_profile: String::new(),
+            browser_bridge: false,
         };
         app.store.save_account(&account)?;
         app.refresh()?;
         assert_eq!(app.status().ready_accounts, 1);
-        assert!(app.verify_login(&mut session, &mut account).await.is_err());
+        let mut wrapped = Session::Native(session);
+        assert!(app.verify_login(&mut wrapped, &mut account).await.is_err());
+        let Session::Native(mut session) = wrapped else {
+            unreachable!()
+        };
         assert_eq!(app.status().ready_accounts, 0);
         assert!(app.store.account(&account.id)?.last_synced.is_none());
         assert!(app.status().browser.contains("需要重新登录同步"));
         session.socket.close(None).await?;
         assert!(!session.reusable().await);
         assert!(session.child.try_wait()?.is_some());
-        let mut reopened = Session::launch(&executable, &profile, "").await?;
+        let mut reopened = NativeSession::launch(&executable, &profile, "").await?;
         assert!(reopened.reusable().await);
         reopened.close().await;
         assert!(reopened.child.try_wait()?.is_some());

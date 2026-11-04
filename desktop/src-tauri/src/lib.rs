@@ -58,6 +58,25 @@ fn accounts(state: tauri::State<Desktop>) -> Result<Vec<Account>, String> {
     result(&state.core, state.core.store.accounts())
 }
 #[tauri::command]
+fn browser_connections(
+    state: tauri::State<Desktop>,
+) -> Vec<flow2api_core::bridge::ConnectionStatus> {
+    state.core.bridge.statuses()
+}
+#[tauri::command]
+fn browser_pairing_code(state: tauri::State<Desktop>) -> Result<String, String> {
+    if state.core.status().service != "running" {
+        return Err("请先启动本机 API，再连接浏览器".into());
+    }
+    Ok(state.core.bridge.pairing_code())
+}
+#[tauri::command]
+fn open_flow_page(app: tauri::AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url("https://flow.google.com/projects", None::<&str>)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 async fn save_account(
     state: tauri::State<'_, Desktop>,
     email: String,
@@ -79,6 +98,7 @@ async fn save_account(
             credits: None,
             browser_data_dir: String::new(),
             browser_profile: String::new(),
+            browser_bridge: false,
         },
     };
     if account.email != email {
@@ -107,7 +127,10 @@ async fn configure_account_browser(
         flow2api_core::browser::validate_profile(&data_dir, &profile).map_err(|e| e.to_string())?;
     }
     state.core.browsers.close_all().await;
+    state.core.bridge.remove(&id);
+    result(&state.core, state.core.store.revoke_browser_connection(&id))?;
     account.browser_data_dir = data_dir;
+    account.browser_bridge = false;
     account.browser_profile = if account.browser_data_dir.is_empty() {
         String::new()
     } else {
@@ -145,6 +168,7 @@ async fn delete_account(state: tauri::State<'_, Desktop>, id: String) -> Result<
         return Err("请等待任务完成后删除账号".into());
     }
     result(&state.core, state.core.store.delete_account(&id))?;
+    state.core.bridge.remove(&id);
     state.core.browsers.close_all().await;
     result(&state.core, state.core.refresh())
 }
@@ -355,75 +379,6 @@ fn open_chrome_download(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_url("https://www.google.com/chrome/", None::<&str>)
         .map_err(|e| e.to_string())
-}
-fn ensure_extension_files(root: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    let dir = root.join("extension");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let _ = std::fs::write(
-        dir.join("manifest.json"),
-        include_str!("../../crates/core/assets/extension/manifest.json"),
-    );
-    let _ = std::fs::write(
-        dir.join("popup.html"),
-        include_str!("../../crates/core/assets/extension/popup.html"),
-    );
-    let _ = std::fs::write(
-        dir.join("popup.js"),
-        include_str!("../../crates/core/assets/extension/popup.js"),
-    );
-    let _ = std::fs::write(
-        dir.join("content.js"),
-        include_str!("../../crates/core/assets/extension/content.js"),
-    );
-    let _ = std::fs::write(
-        dir.join("background.js"),
-        include_str!("../../crates/core/assets/extension/background.js"),
-    );
-    let _ = std::fs::write(
-        dir.join("options.html"),
-        include_str!("../../crates/core/assets/extension/options.html"),
-    );
-    let _ = std::fs::write(
-        dir.join("options.js"),
-        include_str!("../../crates/core/assets/extension/options.js"),
-    );
-    let _ = std::fs::write(
-        dir.join("flow2api-flow-login-sync.user.js"),
-        include_str!("../../crates/core/assets/extension/flow2api-flow-login-sync.user.js"),
-    );
-    Ok(dir)
-}
-#[tauri::command]
-async fn install_chrome_extension(
-    _app: tauri::AppHandle,
-    state: tauri::State<'_, Desktop>,
-) -> Result<String, String> {
-    let root = state.core.store.root.clone();
-    let ext_dir = ensure_extension_files(&root)?;
-    let settings = result(&state.core, state.core.store.settings())?;
-    let executable = flow2api_core::browser::executable(&settings.browser_executable)
-        .map_err(|e| e.to_string())?;
-
-    let mut command = std::process::Command::new(executable);
-    command.arg(format!("--load-extension={}", ext_dir.display()));
-    command.arg("https://flow.google.com/");
-    command
-        .spawn()
-        .map_err(|e| format!("启动 Chrome 失败: {e}"))?;
-
-    Ok(ext_dir.to_string_lossy().into_owned())
-}
-#[tauri::command]
-fn open_extension_folder(
-    app: tauri::AppHandle,
-    state: tauri::State<Desktop>,
-) -> Result<String, String> {
-    let root = state.core.store.root.clone();
-    let ext_dir = ensure_extension_files(&root)?;
-    let _ = app
-        .opener()
-        .open_path(ext_dir.to_string_lossy(), None::<&str>);
-    Ok(ext_dir.to_string_lossy().into_owned())
 }
 #[tauri::command]
 fn open_userscript_url(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
@@ -818,6 +773,9 @@ pub fn run() {
             open_login,
             quick_login,
             sync_account,
+            browser_connections,
+            browser_pairing_code,
+            open_flow_page,
             tasks,
             submit,
             library,
@@ -829,8 +787,6 @@ pub fn run() {
             legacy_history,
             open_data,
             open_chrome_download,
-            install_chrome_extension,
-            open_extension_folder,
             open_userscript_url,
             open_media,
             quit,

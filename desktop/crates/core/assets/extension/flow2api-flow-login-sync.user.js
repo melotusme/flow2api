@@ -1,118 +1,214 @@
 // ==UserScript==
 // @name         Flow2API 登录态同步
 // @namespace    flow2api
-// @version      1.1.0
-// @description  在 Flow 页面把当前 Google Cookie 同步到 Flow2API 桌面版
+// @version      2.0.0
+// @description  将当前 Flow 标签页连接到桌面应用，Google Cookie 始终留在浏览器
 // @match        https://flow.google.com/*
-// @match        https://labs.google/*
-// @grant        GM_cookie
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
+// @grant        unsafeWindow
 // @connect      127.0.0.1
 // @connect      localhost
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
   "use strict";
-  if (location.hostname !== "flow.google.com" && location.hostname !== "labs.google") return;
+  if (location.hostname !== "flow.google.com" || window.top !== window) return;
+  const page = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 
-  function detectEmail() {
+(() => {
+    if (page.__flow2apiTrustedRecaptchaHookInstalled) return;
+    page.Object.defineProperty(
+        page,
+        '__flow2apiTrustedRecaptchaHookInstalled',
+        { value: true }
+    );
+
+    const storageKey = '__flow2apiTrustedRecaptchaExecute';
+    const originalBind = page.Function.prototype.bind;
+    page.Function.prototype.bind = function(thisArg, ...args) {
+        const bound = originalBind.call(this, thisArg, ...args);
+        try {
+            const enterprise = page.grecaptcha && page.grecaptcha.enterprise;
+            if (
+                !page[storageKey] &&
+                enterprise &&
+                this === enterprise.execute &&
+                typeof bound === 'function'
+            ) {
+                page[storageKey] = bound;
+            }
+        } catch (error) {}
+        return bound;
+    };
+
+    // New Flow replaces the public execute wrapper with an assignment that
+    // overwrites the caller action by extension_hijack_detected. Preserve the
+    // requested action when that exact assignment shape is used.
+    page.Object.defineProperty(
+        page,
+        '__flow2apiRecaptchaActionGuardInstalled',
+        { value: true }
+    );
+    const originalAssign = page.Object.assign;
+    page.Object.assign = function(target, ...sources) {
+        let nextSources = sources;
+        if (sources.length >= 2) {
+            const previous = sources[sources.length - 2];
+            const last = sources[sources.length - 1];
+            if (
+                previous &&
+                typeof previous.action === 'string' &&
+                previous.action &&
+                last &&
+                last.action === 'extension_hijack_detected'
+            ) {
+                nextSources = sources.slice(0, -1);
+            }
+        }
+        return originalAssign.call(this, target, ...nextSources);
+    };
+})();
+
+  const KEY = "flow2api.connection.v2";
+  // A non-secret per-tab ID prevents every Flow tab from consuming the same queue.
+  let tabId = sessionStorage.getItem(KEY);
+  if (!tabId) { tabId = crypto.randomUUID(); sessionStorage.setItem(KEY, tabId); }
+  let connection = GM_getValue(KEY + "." + tabId, null);
+  if (connection) connection.resume = true;
+  let stopped = false, busy = false, timer, status;
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const show = text => { if (status) status.textContent = text; };
+  const save = () => GM_setValue(KEY + "." + tabId, connection);
+  function email() {
     for (const el of document.querySelectorAll('[aria-label]')) {
       const label = el.getAttribute('aria-label') || '';
-      const match = label.match(/\(([^()\s]+@[^()\s]+\.[^()\s]+)\)/);
-      if (match) return match[1].toLowerCase();
+      if (!/Google Account|Google 账号|Google 帳戶|Google-Konto|Compte Google/i.test(label)) continue;
+      const match = label.match(/[^()\s]+@[^()\s]+\.[^()\s]+/);
+      if (match) return match[0].toLowerCase();
     }
-    const text = document.body?.innerText || "";
-    const candidates = [...text.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)]
-      .map(match => match[0].toLowerCase());
-    return candidates[0] || "";
+    return null;
   }
-
-  const panel = document.createElement("div");
-  panel.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:2147483647;background:#152226;color:#e7eeec;padding:14px;border:1px solid #30474b;border-radius:10px;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:320px;box-shadow:0 8px 24px #0008";
-
-  const title = document.createElement("div");
-  title.style.cssText = "font-weight:600;margin-bottom:8px;color:#85dfbf";
-  title.textContent = "Flow2API 同步助手";
-
-  const address = document.createElement("input");
-  address.value = localStorage.getItem("flow2api_server") || "http://127.0.0.1:8000";
-  address.style.cssText = "width:100%;box-sizing:border-box;background:#0d1518;color:#e7eeec;border:1px solid #314448;border-radius:6px;padding:6px 8px;font-size:12px;margin-bottom:8px";
-
-  const button = document.createElement("button");
-  button.textContent = "同步当前登录到 Flow2API";
-  button.style.cssText = "width:100%;padding:8px 12px;background:#85dfbf;color:#12352b;border:0;border-radius:6px;font-weight:600;cursor:pointer";
-
-  const status = document.createElement("div");
-  status.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.5;color:#92a9ab;margin-top:8px";
-  status.textContent = "已登录后点击上方按钮即可同步到桌面版。";
-
-  panel.append(title, address, button, status);
-  document.body.append(panel);
-
-  button.addEventListener("click", async () => {
-    const server = address.value.trim().replace(/\/+$/, "");
-    if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(server)) {
-      status.textContent = "请填写本机 Flow2API 地址（如 http://127.0.0.1:8000）";
-      return;
-    }
-    localStorage.setItem("flow2api_server", server);
-
-    const email = detectEmail();
-    button.disabled = true;
-    status.textContent = "正在读取当前 Cookie…";
-
-    function listCookies(url) {
-      return new Promise((resolve, reject) => {
-        if (typeof GM_cookie === "undefined") {
-          return reject(new Error("当前脚本管理器未开启 GM_cookie 权限，请改用 Flow2API Chrome 扩展。"));
-        }
-        GM_cookie.list({ url }, (cookies, error) => {
-          if (error) reject(new Error(String(error)));
-          else resolve(cookies || []);
-        });
-      });
-    }
-
-    try {
-      const cookies = await listCookies(location.origin + "/");
-      if (!cookies.length) {
-        throw new Error("未能获取到 Cookie，请先在当前页面确认已登录 Flow。");
+  function localServer(value) {
+    const u = new URL(value);
+    if (u.protocol !== 'http:' || !['localhost','127.0.0.1'].includes(u.hostname) || u.username || u.password || u.search || u.hash || u.pathname !== '/') throw Error('只支持本机地址，例如 http://127.0.0.1:8000');
+    return u.origin;
+  }
+  function request(server, path, body, token) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method: 'POST', url: server + path, anonymous: true, timeout: 15000,
+      headers: {'Content-Type':'application/json', ...(token ? {Authorization:'Bearer '+token} : {})},
+      data: JSON.stringify(body),
+      onload(r) {
+        let data; try { data = JSON.parse(r.responseText); } catch { return reject(Error('本机服务返回无效响应，请确认端口属于 Flow2API')); }
+        if (r.status < 200 || r.status >= 300) {
+          const e = Error(data.error?.message || '连接失败（HTTP '+r.status+'）'); e.status = r.status; reject(e);
+        } else resolve(data);
+      },
+      ontimeout: () => reject(Error('本机连接超时，请确认应用已启动')),
+      onerror: () => reject(Error('无法连接本机应用；应用启动后会自动重连')),
+    }));
+  }
+  function flowURL(value) {
+    const u = new URL(value);
+    if (u.origin !== 'https://flow.google.com' || u.username || u.password) throw Error('拒绝访问 Flow 以外的地址');
+    return u;
+  }
+  async function execute(command) {
+    // Every operation rechecks identity. Switching the Google account cannot cause
+    // a queued request for the previous account to be submitted under the new one.
+    for (let i=0; i<60 && !email(); i++) await delay(250);
+    if (!email() || email() !== connection.email) throw Error('Flow 登录账号已改变，请重新连接');
+    const input = command.input || {};
+    switch (command.operation) {
+      case 'identity': return {email: email()};
+      case 'fetch': {
+        const url = flowURL(input.url);
+        if (!['GET','POST'].includes(input.method)) throw Error('不支持的请求方法');
+        if (input.method === 'POST' && url.pathname !== '/_/AiSandboxAngularFrontend/data/batchexecute') throw Error('拒绝非 Flow RPC 请求');
+        if (input.method === 'GET' && !/^\/(projects|project\/[a-f0-9-]{36})$/.test(url.pathname)) throw Error('拒绝非 Flow 页面请求');
+        const response = await page.fetch(url.href, {method:input.method, credentials:'include', headers:{'Content-Type':input.content_type,'x-same-domain':'1'}, ...(input.body == null ? {} : {body:input.body}), signal:page.AbortSignal.timeout(90000)});
+        return {status:response.status, text:await response.text()};
       }
-
-      status.textContent = "正在发送登录态到 Flow2API…";
-
-      GM_xmlhttpRequest({
-        method: "POST",
-        url: server + "/api/browser-login/sync",
-        headers: { "Content-Type": "application/json" },
-        data: JSON.stringify({
-          login_account: email,
-          google_cookies: JSON.stringify(cookies),
-          protocol_mode: "protocol"
-        }),
-        onload: function (res) {
-          button.disabled = false;
-          try {
-            const data = JSON.parse(res.responseText);
-            if (data.success) {
-              const acc = data.email || email || "Google 账号";
-              const cred = (data.credits !== undefined && data.credits !== null) ? ` · 余额: ${data.credits}` : "";
-              status.textContent = `✓ 同步成功！已连接 ${acc}${cred}\n请返回桌面端查看。`;
-            } else {
-              status.textContent = "同步失败：" + (data.detail || data.error?.message || res.responseText);
-            }
-          } catch (e) {
-            status.textContent = "响应解析错误: " + res.responseText;
-          }
-        },
-        onerror: function (err) {
-          button.disabled = false;
-          status.textContent = "连接失败，请确认 Flow2API 桌面版已启动且端口一致。";
+      case 'navigate': {
+        const url = flowURL(input.url);
+        if (!/^\/(projects|project\/[a-f0-9-]{36})$/.test(url.pathname) || url.search || url.hash) throw Error('项目地址无效');
+        if (location.href !== url.href) {
+          connection.result = {id:command.id, value:{navigated:true}};
+          save(); location.assign(url.href);
+          return new Promise(()=>{}); // Completion is sent by the next document, after login is ready.
         }
-      });
-    } catch (err) {
-      button.disabled = false;
-      status.textContent = err.message || "同步异常";
+        return {navigated:true};
+      }
+      case 'captcha': {
+        if (!['IMAGE_GENERATION','VIDEO_GENERATION','UPLOAD_IMAGE'].includes(input.action)) throw Error('验证码动作无效');
+        for (let i=0; i<80 && !page.grecaptcha?.enterprise; i++) await delay(250);
+        const execute = page.__flow2apiTrustedRecaptchaExecute || page.grecaptcha?.enterprise?.execute;
+        if (typeof execute !== 'function') throw Error('Flow 验证码尚未就绪');
+        const token = await Promise.race([execute.call(page.grecaptcha.enterprise, '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV', {action:input.action}), delay(45000).then(()=>{throw Error('验证码超时');})]);
+        if (!token) throw Error('验证码为空');
+        return {token};
+      }
+      default: throw Error('不支持的浏览器操作');
     }
-  });
+  }
+  async function poll() {
+    if (!connection || stopped || busy) return;
+    busy = true;
+    try {
+      const response = await request(connection.server, '/api/browser-bridge/poll', {result:connection.result || null,resume:Boolean(connection.resume)}, connection.token);
+      connection.result = null; connection.resume = false; save();
+      const state = response.connection;
+      show(state.state === 'ready' ? '已连接 · '+connection.email+'\n可以返回应用创作，请保持此标签页打开。' : state.message);
+      for (const command of response.commands || []) {
+        try { connection.result = {id:command.id, value:await execute(command)}; }
+        catch { connection.result = {id:command.id, error:'浏览器操作失败，请检查 Flow 登录与网络'}; }
+        save();
+      }
+    } catch (error) {
+      show(error.message);
+      if (error.status === 401) { connection=null; GM_deleteValue(KEY+'.'+tabId); }
+    } finally {
+      busy=false;
+      if (!stopped && connection) timer=setTimeout(poll,500);
+    }
+  }
+  let heartbeatBusy=false;
+  setInterval(async()=>{
+    if(!connection || stopped || heartbeatBusy)return;
+    heartbeatBusy=true;
+    try{await request(connection.server,'/api/browser-bridge/poll',{heartbeat:true},connection.token);}catch{}finally{heartbeatBusy=false;}
+  },3000);
+  function mount() {
+    // Replace the previous script's panel if the installed version is being updated.
+    const panel = document.createElement('aside');
+    panel.id = 'flow2api-connection';
+    panel.style.cssText='position:fixed;bottom:20px;right:20px;z-index:2147483647;background:#152226;color:#e7eeec;padding:16px;border:1px solid #30474b;border-radius:12px;font:13px system-ui;width:300px;box-shadow:0 8px 24px #0008';
+    const title=document.createElement('strong'); title.textContent='Flow2API · 浏览器连接';
+    const address=document.createElement('input'); address.value=connection?.server || 'http://127.0.0.1:8000'; address.placeholder='本机应用地址'; address.setAttribute('aria-label','Flow2API 本机地址');
+    const code=document.createElement('input'); code.placeholder='粘贴应用里的连接码（5 分钟有效）'; code.setAttribute('aria-label','一次性连接码'); code.autocomplete='off';
+    const button=document.createElement('button'); button.textContent='连接当前 Flow 账号';
+    for(const input of [address,code]) input.style.cssText='display:block;width:100%;box-sizing:border-box;background:#0d1518;color:#e7eeec;border:1px solid #314448;border-radius:6px;padding:9px;font:12px system-ui;margin:10px 0';
+    button.style.cssText='width:100%;padding:10px;background:#85dfbf;color:#12352b;border:0;border-radius:6px;font-weight:600;cursor:pointer';
+    status=document.createElement('div');status.setAttribute('role','status'); status.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.6;margin-top:10px';
+    show('在桌面应用获取连接码，连接后会校验身份和余额。Cookie 始终保留在当前浏览器。');
+    button.onclick=async()=>{
+      if(busy) {show('浏览器正在执行操作，请等待完成后再连接');return;}
+      button.disabled=true; clearTimeout(timer);
+      try {
+        const server=localServer(address.value.trim());
+        const currentEmail=email(); if(!currentEmail)throw Error('请先在当前页面登录 Google Flow');
+        const paired=await request(server,'/api/browser-bridge/pair',{code:code.value.trim(),email:currentEmail});
+        connection={server,token:paired.token,email:currentEmail};save();code.value='';stopped=false;
+        show('已配对，正在校验 Flow 身份与余额…');poll();
+      } catch(error) {show(error.message); if(connection)poll();}
+      finally {button.disabled=false;}
+    };
+    panel.append(title,address,code,button,status);document.body.append(panel);
+    if(connection)poll();
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
 })();

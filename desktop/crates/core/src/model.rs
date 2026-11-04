@@ -51,6 +51,8 @@ pub struct Account {
     pub browser_data_dir: String,
     #[serde(default)]
     pub browser_profile: String,
+    #[serde(default)]
+    pub browser_bridge: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

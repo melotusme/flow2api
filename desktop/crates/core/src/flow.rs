@@ -243,6 +243,13 @@ pub fn error_code(value: &Value) -> Option<String> {
         _ => None,
     }
 }
+pub fn credits(value: &Value) -> Result<i64> {
+    value
+        .as_array()
+        .and_then(|a| a.iter().find_map(Value::as_i64))
+        .filter(|v| *v >= 0)
+        .context("Flow 未返回有效余额，登录校验没有通过")
+}
 pub fn media_url(value: &Value, kind: &str) -> Option<String> {
     match value {
         Value::String(s) if s.starts_with("https://") && s.contains(&format!("/{kind}/")) => {

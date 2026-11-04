@@ -33,6 +33,8 @@ pub fn router(app: Arc<App>) -> Router {
             "/api/browser-login/sync",
             post(sync_browser_login).options(cors_options),
         )
+        .route("/api/browser-bridge/pair", post(pair_browser))
+        .route("/api/browser-bridge/poll", post(poll_browser))
         .route(
             "/extension/flow2api-flow-login-sync.user.js",
             get(userscript_content),
@@ -107,7 +109,7 @@ fn authorize(
 async fn health(State(app): State<Arc<App>>) -> Json<Value> {
     let s = app.status();
     Json(
-        json!({"status":"healthy","backend_running":true,"service":s.service,"total_tokens":s.total_accounts,"enabled_accounts":s.accounts,"active_tokens":s.ready_accounts,"has_active_tokens":s.ready_accounts>0,"readiness_source":"last_verified_login","captcha_method":"native_chrome","remote_browser_configured":false,"tasks":{"running":s.running,"queued":s.queued,"succeeded":s.succeeded,"failed":s.failed}}),
+        json!({"status":"healthy","backend_running":true,"service":s.service,"total_tokens":s.total_accounts,"enabled_accounts":s.accounts,"active_tokens":s.ready_accounts,"has_active_tokens":s.ready_accounts>0,"readiness_source":"verified_browser_session","captcha_method":"browser_session","remote_browser_configured":false,"tasks":{"running":s.running,"queued":s.queued,"succeeded":s.succeeded,"failed":s.failed}}),
     )
 }
 async fn metrics(State(app): State<Arc<App>>) -> Response {
@@ -424,14 +426,6 @@ fn byte_range(raw: &str, size: u64) -> Option<(u64, u64)> {
     }
 }
 
-#[derive(serde::Deserialize)]
-struct SyncBrowserLoginPayload {
-    #[serde(default)]
-    login_account: String,
-    #[serde(default)]
-    google_cookies: Value,
-}
-
 async fn cors_options() -> Response {
     (
         StatusCode::NO_CONTENT,
@@ -461,47 +455,72 @@ async fn userscript_content() -> impl IntoResponse {
 }
 
 async fn sync_browser_login(
-    State(app): State<Arc<App>>,
-    Json(payload): Json<SyncBrowserLoginPayload>,
+    State(_app): State<Arc<App>>,
+    Json(_payload): Json<Value>,
 ) -> Result<Response, ApiError> {
-    let cookies_val: Vec<Value> = match payload.google_cookies {
-        Value::String(s) => serde_json::from_str(&s).map_err(|e| {
-            ApiError(
-                StatusCode::BAD_REQUEST,
-                format!("Cookie JSON 解析失败: {e}"),
-            )
-        })?,
-        Value::Array(arr) => arr,
-        _ => Vec::new(),
-    };
-    if cookies_val.is_empty() {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "未提供有效的 google_cookies".into(),
-        ));
+    Err(ApiError(StatusCode::GONE, "旧版 Cookie 搬运已停用。请在应用安装新版连接脚本、获取连接码，再在当前 Flow 标签页连接。支持 Ego Lite 和 Chrome。".into()))
+}
+
+#[derive(serde::Deserialize)]
+struct PairBrowser {
+    code: String,
+    email: String,
+}
+async fn pair_browser(
+    State(app): State<Arc<App>>,
+    Json(payload): Json<PairBrowser>,
+) -> Result<Json<Value>, ApiError> {
+    let (id, token) = app.pair_browser(&payload.code, &payload.email).await?;
+    Ok(Json(json!({"account_id":id,"token":token})))
+}
+#[derive(serde::Deserialize)]
+struct BrowserPoll {
+    #[serde(default)]
+    result: Option<crate::bridge::Completion>,
+    #[serde(default)]
+    heartbeat: bool,
+    #[serde(default)]
+    resume: bool,
+}
+async fn poll_browser(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Json(payload): Json<BrowserPoll>,
+) -> Result<Json<Value>, ApiError> {
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "请重新连接浏览器".into()))?;
+    let peer = app.browser_peer(token).map_err(|_| {
+        ApiError(
+            StatusCode::UNAUTHORIZED,
+            "浏览器连接已失效，请重新连接".into(),
+        )
+    })?;
+    if payload.resume || !peer.online() {
+        peer.revalidate();
     }
-    let email_opt = if payload.login_account.trim().is_empty() {
-        None
+    peer.touch();
+    let commands = if payload.heartbeat {
+        vec![]
     } else {
-        Some(payload.login_account.trim())
+        peer.poll(payload.result).await
     };
-    let account = app.sync_cookies(email_opt, &cookies_val).await?;
-    let resp = (
-        StatusCode::OK,
-        [
-            ("access-control-allow-origin", "*"),
-            ("access-control-allow-headers", "*"),
-        ],
-        Json(json!({
-            "success": true,
-            "email": account.email,
-            "credits": account.credits,
-            "added": 1,
-            "updated": 0,
-        })),
-    )
-        .into_response();
-    Ok(resp)
+    if !peer
+        .validating
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        let app = app.clone();
+        let peer = peer.clone();
+        tokio::spawn(async move {
+            app.validate_browser(peer).await;
+        });
+    }
+    app.refresh()?;
+    Ok(Json(
+        json!({"commands":commands,"connection":peer.status()}),
+    ))
 }
 
 #[cfg(test)]
@@ -802,14 +821,14 @@ mod tests {
         let text = String::from_utf8(body.to_vec())?;
         assert!(text.contains("Flow2API 登录态同步"));
 
-        // 3. Empty cookies rejected
+        // 3. Old cookie transfer is explicitly retired, never falsely accepted.
         let post_req = axum::http::Request::builder()
             .method("POST")
             .uri("/api/browser-login/sync")
             .header("content-type", "application/json")
             .body(Body::from(r#"{"login_account":"","google_cookies":[]}"#))?;
         let resp: Response = router(app.clone()).oneshot(post_req).await?;
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::GONE);
 
         Ok(())
     }

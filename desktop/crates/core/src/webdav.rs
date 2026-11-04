@@ -594,6 +594,7 @@ mod tests {
                 credits: Some(10),
                 browser_data_dir: "/tmp/chrome profile".into(),
                 browser_profile: "Default".into(),
+                browser_bridge: false,
             })
             .unwrap();
         let payload = serde_json::to_string(&portable_from(&store).unwrap()).unwrap();
@@ -623,6 +624,7 @@ mod tests {
                 credits: Some(4),
                 browser_data_dir: directory.path().join("profile").display().to_string(),
                 browser_profile: "Default".into(),
+                browser_bridge: false,
             })
             .unwrap();
         store

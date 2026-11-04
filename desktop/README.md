@@ -6,7 +6,7 @@
 
 ## 开发与运行
 
-开发机器需要 Rust、Tauri 2 CLI，以及对应系统的编译工具。Windows 使用 MSVC C++ 工具与 WebView2；macOS 使用 Xcode Command Line Tools。使用者安装成品应用后不需要 Rust、Python、Node 或 Docker。Flow 登录与验证码仍依赖本机 Chrome。 **桌面版不需要浏览器插件**，旧版 Cookie 同步插件不用于此版本。账号页提供 Chrome 官方下载入口和首次登录步骤。
+开发机器需要 Rust、Tauri 2 CLI，以及对应系统的编译工具。Windows 使用 MSVC C++ 工具与 WebView2；macOS 使用 Xcode Command Line Tools。使用者安装成品应用后不需要 Rust、Python、Node 或 Docker。v0.3.0 默认通过连接脚本复用系统默认浏览器里的 Flow 登录，支持 Ego Lite、Chrome。Cookie 留在原浏览器；需 Tampermonkey。专用 Chrome 独立登录保留在高级选项。详见 [浏览器连接](../docs/browser-connection.md)。
 
 ```bash
 # 从项目根目录运行测试
@@ -18,8 +18,7 @@ rtk proxy cargo tauri dev
 # 关闭窗口后继续后台运行；从托盘／菜单栏选择“退出 Flow2API”停止
 ```
 
-首次启动会创建应用数据目录及随机 API Key，默认尝试监听 `127.0.0.1:8000`。端口冲突会显示错误，可在设置中停止服务、修改端口并重新启动。通过“账号”手动填写邮箱或点选常用邮箱、打开专用 Chrome 登录，再点击“同步登录”。默认每个账号使用独立资料；也可在账号卡片点击“选择已有登录资料”，应用自动扫描本机标准位置的 Chrome 资料，按名称和邮箱展示，匹配当前邮箱的优先显示；无需查找文件夹。自定义位置可通过“其他位置：手动选择”指定 User Data 根目录和 Default / Profile 1 子目录名。资料名称不代表登录有效，仍需同步校验。请在 chrome://version 核对路径，选择前正常退出使用该根目录的浏览器。应用会直接更新选中的资料，并在退出时关闭它启动的浏览器；不会复制 Cookie 或删除锁。同一 User Data 只能绑定一个账号。Chrome 新版可能禁止默认日常目录调试，失败时改用独立登录。EgoLite 直接启动尚未通过测试，当前不作为支持浏览器。
-
+首次启动会创建应用数据目录及随机 API Key，默认监听 `127.0.0.1:8000`。在账号页安装新版脚本、打开 Flow、获取连接码，并在 Flow 标签页连接。只有实际邮箱和余额校验通过的在线账号可生成；不会搬运日常浏览器的 Cookie 或占用它的资料目录。专用 Chrome 登录见高级选项。
 ```bash
 # 不启动界面的纯 Rust 服务（独立测试数据目录，避免和桌面版同时打开同一数据库）
 rtk proxy cargo run --manifest-path desktop/Cargo.toml -p flow2api-core --bin flow2api-server -- /tmp/flow2api-native-check

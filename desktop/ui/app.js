@@ -1,9 +1,9 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.2.3';
+const APP_VERSION='0.3.0';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
-const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio'};
+const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[]};
 const labels = {queued:'排队中',running:'生成中',succeeded:'已保存',failed:'失败',interrupted:'已中断',archived:'旧版已完成'};
 const titles = {studio:'创作工作台',tasks:'任务与进度',library:'本机作品',accounts:'Google 账号',settings:'设置与接入'};
 let noticeTimer;
@@ -391,19 +391,26 @@ async function chooseAccountProfile(account){
   dialog.showModal();
 }
 
+function accountReady(a){
+  return a.enabled&&Boolean(a.last_synced)&&(!a.browser_bridge||state.connections.some(c=>c.account_id===a.id&&c.connected&&c.state==='ready'));
+}
+
 function accountCard(account){
   const row=node('article',undefined,'account-card');
   const info=node('div');
+  const connection=state.connections.find(c=>c.account_id===account.id);
+  const online=!account.browser_bridge||Boolean(connection?.connected&&connection.state==='ready');
   info.append(
     node('strong',account.email),
-    node('p',`${account.enabled?'已启用':'已停用'} · ${account.last_synced?'同步于 '+new Date(account.last_synced).toLocaleString():'待登录同步'}${account.credits===null?'':' · '+account.credits+' credits'}`)
+    node('p',`${account.enabled?'已启用':'已停用'} · ${account.last_synced&&online?'同步于 '+new Date(account.last_synced).toLocaleString():'待登录同步'}${account.credits===null?'':' · '+account.credits+' credits'}`)
   );
   const binding=node('div',undefined,'hint');
-  binding.textContent=account.browser_data_dir?`已有资料：${account.browser_data_dir} · ${account.browser_profile}`:'独立登录：应用自动创建并保留资料';
+  binding.textContent=account.browser_bridge?(connection?.connected?connection.message:'默认浏览器连接已断开，请打开 Flow 标签页；若未自动恢复，请重新获取连接码'):account.browser_data_dir?`已有资料：${account.browser_data_dir} · ${account.browser_profile}`:'独立登录：应用自动创建并保留资料';
   info.append(binding);
   const actions=node('div',undefined,'actions');
   actions.append(
-    button('打开登录窗口',async()=>{
+    button(account.browser_bridge?'打开 Flow 页面':'打开登录窗口',async()=>{
+      if(account.browser_bridge){await invoke('open_flow_page');return;}
       await invoke('open_login',{id:account.id});
       notice('请在专用 Chrome 中登录 '+account.email+'，完成后会自动检测并同步（也可点“同步登录”）。');
     },'primary'),
@@ -444,8 +451,8 @@ const accountsView=createListView({
     {value:'disabled',label:'已停用'},
   ],
   matchFilter:(a,filter)=>{
-    if(filter==='ready')return a.enabled&&Boolean(a.last_synced);
-    if(filter==='unsynced')return a.enabled&&!a.last_synced;
+    if(filter==='ready')return accountReady(a);
+    if(filter==='unsynced')return a.enabled&&!accountReady(a);
     if(filter==='disabled')return !a.enabled;
     return true;
   },
@@ -456,7 +463,7 @@ const accountsView=createListView({
     {value:'credits',label:'余额',get:a=>a.credits??-1},
   ],
   defaultOrder:'asc',
-  emptyText:'先添加账号，再打开 Chrome 登录并同步。',
+  emptyText:'打开 Flow 页面，获取连接码并在页面连接当前账号。',
   noMatchText:'没有匹配当前筛选条件的 Google 账号。',
   revisionKey:items=>items,
   renderItem:accountCard,
@@ -467,7 +474,7 @@ function renderAccounts(){
   const previous=select.value;
   select.replaceChildren(node('option','自动分配已登录账号'));
   select.firstChild.value='';
-  for(const account of state.accounts.filter(a=>a.enabled&&a.last_synced)){
+  for(const account of state.accounts.filter(accountReady)){
     const option=node('option',account.email);
     option.value=account.id;
     select.append(option);
@@ -561,12 +568,14 @@ async function reloadSettings(){
 }
 
 async function refresh(){
-  const [accounts,tasks,media,status]=await Promise.all([
+  const [accounts,tasks,media,status,connections]=await Promise.all([
     invoke('accounts'),
     invoke('tasks'),
     invoke('library'),
     invoke('status'),
+    invoke('browser_connections'),
   ]);
+  state.connections=connections;
   state.accounts=accounts;
   state.tasks=tasks;
   state.media=media;
@@ -589,17 +598,15 @@ $('quick-login').onclick=()=>action($('quick-login'),async()=>{
   await invoke('quick_login');
   notice('已打开 Chrome，请登录 Google 账号。登录完成后应用会自动识别邮箱并同步，无需其他操作。');
 });
-$('install-extension').onclick=()=>action($('install-extension'),async()=>{
-  const path=await invoke('install_chrome_extension');
-  notice(`已为你启动 Chrome 并自动挂载扩展（目录：${path}）。\n若需永久安装，可开启 chrome://extensions 开发者模式后将该目录拖入。`);
+$('open-flow').onclick=()=>action($('open-flow'),()=>invoke('open_flow_page'));
+$('pair-browser').onclick=()=>action($('pair-browser'),async()=>{
+  const code=await invoke('browser_pairing_code');
+  $('pairing-code').textContent=`连接码：${code} · 5 分钟有效，复制到 Flow 页面右下角。`;
+  await copy(code);
 });
 $('open-userscript').onclick=()=>action($('open-userscript'),async()=>{
   await invoke('open_userscript_url');
   notice('已在浏览器中打开油猴脚本安装页面。若已安装 Tampermonkey 扩展，将直接弹出安装提示。');
-});
-$('open-extension-dir').onclick=()=>action($('open-extension-dir'),async()=>{
-  const path=await invoke('open_extension_folder');
-  notice(`已打开扩展目录：${path}。\n在 Chrome 打开 chrome://extensions 并开启「开发者模式」，拖入此目录即可。`);
 });
 $('download-chrome').onclick=()=>action($('download-chrome'),()=>invoke('open_chrome_download'));
 
@@ -651,7 +658,7 @@ $('images').onchange=async()=>{
 $('generate').onclick=()=>action($('generate'),async()=>{
   const model=selectedModel();
   if(!model)throw Error('请选择模型');
-  if(!state.accounts.some(a=>a.enabled&&a.last_synced)){
+  if(!state.accounts.some(accountReady)){
     page('accounts');
     throw Error('请先添加账号并完成登录同步');
   }

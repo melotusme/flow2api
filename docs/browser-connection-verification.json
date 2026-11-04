@@ -1,0 +1,38 @@
+{
+  "version": "0.3.0",
+  "verification_date": "2026-11-04",
+  "platform": "macOS arm64",
+  "browser": "Ego Lite",
+  "original_failure": "Cookie transfer to standalone Chrome failed account verification; active_tokens=0",
+  "connection": {
+    "identity_and_balance": "passed against real Google Flow",
+    "credits_before": 1050,
+    "active_tokens_after": 1,
+    "page_reload": "passed",
+    "application_restart": "passed",
+    "credits_after": 1050
+  },
+  "generation": {
+    "model": "gemini-3.1-flash-lite-image-square",
+    "task_id": "507bf236-5cdb-481c-80ba-f7b2bfd40232",
+    "state": "succeeded",
+    "image": "8845dc8fb27d9e4b3ea18a013e5fa1655fff511226fdf6b62d59d01aab488b25.jpg",
+    "width": 1024,
+    "height": 1024,
+    "media_http_status": 200,
+    "visual_inspection": "cobalt blue teapot on cream background",
+    "media_bytes": 637479,
+    "desktop_library": "visible in installed application"
+  },
+  "tests": {
+    "passed": 40,
+    "ignored": 5,
+    "failed": 0
+  },
+  "not_verified": [
+    "physical Windows",
+    "video workflows",
+    "long duration session stability"
+  ],
+  "local_package": "dist/Flow2API_0.3.0_macOS-arm64-local.zip"
+}

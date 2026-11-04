@@ -443,6 +443,7 @@ pub fn import(store: &Store, path: &Path, import_settings: bool) -> Result<Repor
                     credits: row["credits"].as_i64(),
                     browser_data_dir: String::new(),
                     browser_profile: String::new(),
+                    browser_bridge: false,
                 };
                 tx.execute(
                     "INSERT INTO accounts(id,value) VALUES(?1,?2)",
@@ -808,6 +809,7 @@ mod tests {
             credits: Some(800),
             browser_data_dir: String::new(),
             browser_profile: String::new(),
+            browser_bridge: false,
         };
         store.save_account(&account)?;
         let key = store.settings()?.api_key;

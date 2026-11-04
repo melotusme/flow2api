@@ -80,35 +80,21 @@ impl App {
             bail!("请等待生成任务完成后同步账号");
         }
         let mut account = self.store.account(id)?;
-        let settings = self.store.settings()?;
-        let session = match self
-            .browsers
-            .session(
-                id,
-                &settings.browser_executable,
-                &settings.proxy_url,
-                &account.browser_data_dir,
-                &account.browser_profile,
-            )
-            .await
-        {
-            Ok(s) => s,
-            Err(e) if !account.browser_data_dir.is_empty() => {
-                bail!(
-                    "{}。若日常 Chrome 正在运行，请在账号卡片中点击「改为独立登录」或通过 Chrome 扩展「同步到 Flow2API」，无需退出日常浏览器。",
-                    e
-                );
-            }
-            Err(e) => return Err(e),
-        };
+        account.last_synced = None;
+        self.store.save_account(&account)?;
+        self.refresh()?;
+        let session = self.account_session(&account).await?;
         let mut session = session.lock().await;
         self.verify_login(&mut session, &mut account).await?;
         let credits = flow::rpc(&mut session, "nzlxg", json!([]), None).await?;
-        account.credits = credits
-            .as_array()
-            .and_then(|a| a.iter().find_map(Value::as_i64));
+        account.credits = Some(flow::credits(&credits)?);
         account.last_synced = Some(now());
         self.store.save_account(&account)?;
+        if account.browser_bridge {
+            if let Some(peer) = self.bridge.get(id) {
+                peer.set_state("ready", "身份与余额校验通过，可以创作");
+            }
+        }
         self.change_status(|s| {
             s.browser = format!("已连接 {}", account.email);
             s.last_error = None;
@@ -179,11 +165,13 @@ impl App {
             credits: None,
             browser_data_dir: String::new(),
             browser_profile: String::new(),
+            browser_bridge: false,
         };
-        if let Ok(credits) = flow::rpc(&mut session, "nzlxg", json!([]), None).await {
-            account.credits = credits
-                .as_array()
-                .and_then(|a| a.iter().find_map(Value::as_i64));
+        if let Ok(credits) = flow::rpc(&mut session, "nzlxg", json!([]), None)
+            .await
+            .and_then(|v| flow::credits(&v))
+        {
+            account.credits = Some(credits);
             account.last_synced = Some(now());
         }
         self.store.save_account(&account)?;
@@ -193,145 +181,6 @@ impl App {
         });
         self.refresh()?;
         Ok(Some(account))
-    }
-    /// Import cookies exported from the Chrome extension or UserScript.
-    /// Injects cookies into a dedicated browser profile via CDP, navigates to Flow,
-    /// verifies login / reads credits, and saves the account.
-    pub async fn sync_cookies(&self, email: Option<&str>, cookies: &[Value]) -> Result<Account> {
-        let _admission = self.job_gate.lock().await;
-        self.ensure_available()?;
-        if self.status().busy() {
-            bail!("请等待当前生成任务完成后导入账号");
-        }
-        let mut cdp_cookies = Vec::new();
-        for c in cookies {
-            let Some(name) = c.get("name").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            let Some(value) = c.get("value").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            let mut obj = json!({
-                "name": name,
-                "value": value,
-            });
-            if let Some(domain) = c.get("domain").and_then(|v| v.as_str()) {
-                obj["domain"] = json!(domain);
-            }
-            if let Some(path) = c.get("path").and_then(|v| v.as_str()) {
-                obj["path"] = json!(path);
-            }
-            if let Some(secure) = c.get("secure").and_then(|v| v.as_bool()) {
-                obj["secure"] = json!(secure);
-            }
-            if let Some(http_only) = c
-                .get("httpOnly")
-                .or_else(|| c.get("http_only"))
-                .and_then(|v| v.as_bool())
-            {
-                obj["httpOnly"] = json!(http_only);
-            }
-            if let Some(expires) = c
-                .get("expirationDate")
-                .or_else(|| c.get("expires"))
-                .and_then(|v| v.as_f64())
-            {
-                obj["expires"] = json!(expires);
-            }
-            cdp_cookies.push(obj);
-        }
-        if cdp_cookies.is_empty() {
-            bail!("未找到有效的 Cookie 数据");
-        }
-
-        let existing = if let Some(e) = email.filter(|s| !s.trim().is_empty()) {
-            self.store
-                .accounts()?
-                .into_iter()
-                .find(|a| a.email.eq_ignore_ascii_case(e.trim()))
-        } else {
-            None
-        };
-
-        let id = existing
-            .as_ref()
-            .map(|a| a.id.clone())
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let settings = self.store.settings()?;
-        // Cookie sync injects cookies into Flow2API's dedicated standalone profile so that
-        // it never locks or conflicts with everyday Chrome instances.
-        let session = self
-            .browsers
-            .session(
-                &id,
-                &settings.browser_executable,
-                &settings.proxy_url,
-                "",
-                "",
-            )
-            .await?;
-
-        let mut session = session.lock().await;
-        session
-            .call("Network.setCookies", json!({ "cookies": cdp_cookies }))
-            .await?;
-        session.navigate("https://flow.google.com/projects").await?;
-
-        let mut detected_email = None;
-        for _ in 0..15 {
-            if let Ok(Some(e)) = session.detect_email().await {
-                detected_email = Some(e);
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-
-        let target_email = match (detected_email, email) {
-            (Some(e), _) => e,
-            (None, Some(e)) if !e.trim().is_empty() => {
-                session.verify_account(e.trim()).await?;
-                e.trim().to_lowercase()
-            }
-            _ => bail!("未能从 Flow 页面识别到登录账号，请确认已在浏览器中正常登录 Flow"),
-        };
-
-        let credits = flow::rpc(&mut session, "nzlxg", json!([]), None)
-            .await
-            .ok()
-            .and_then(|c| c.as_array().and_then(|a| a.iter().find_map(Value::as_i64)));
-
-        let account = match self
-            .store
-            .accounts()?
-            .into_iter()
-            .find(|a| a.email.eq_ignore_ascii_case(&target_email))
-        {
-            Some(mut acc) => {
-                acc.credits = credits;
-                acc.last_synced = Some(now());
-                acc.browser_data_dir = String::new();
-                acc.browser_profile = String::new();
-                acc
-            }
-            None => Account {
-                id: id.clone(),
-                email: target_email.clone(),
-                enabled: true,
-                project_id: String::new(),
-                last_synced: Some(now()),
-                credits,
-                browser_data_dir: String::new(),
-                browser_profile: String::new(),
-            },
-        };
-
-        self.store.save_account(&account)?;
-        self.change_status(|s| {
-            s.browser = format!("已从扩展连接 {}", account.email);
-            s.last_error = None;
-        });
-        self.refresh()?;
-        Ok(account)
     }
     pub async fn try_auto_sync(&self, id: &str) -> Result<Option<Account>> {
         let Ok(_admission) = self.job_gate.try_lock() else {
@@ -351,9 +200,7 @@ impl App {
         let Ok(credits) = flow::rpc(&mut session, "nzlxg", json!([]), None).await else {
             return Ok(None);
         };
-        account.credits = credits
-            .as_array()
-            .and_then(|a| a.iter().find_map(Value::as_i64));
+        account.credits = Some(flow::credits(&credits)?);
         account.last_synced = Some(now());
         self.store.save_account(&account)?;
         self.change_status(|s| {
@@ -375,14 +222,21 @@ impl App {
         }
         let accounts = self.store.accounts()?;
         let account = match request.account_id.as_deref() {
-            Some(id) => accounts
-                .into_iter()
-                .find(|a| a.id == id && a.enabled && a.last_synced.is_some()),
+            Some(id) => accounts.into_iter().find(|a| {
+                a.id == id
+                    && a.enabled
+                    && a.last_synced.is_some()
+                    && (!a.browser_bridge || self.bridge.ready(&a.id))
+            }),
             None => {
                 let tasks = self.store.tasks()?;
                 accounts
                     .into_iter()
-                    .filter(|a| a.enabled && a.last_synced.is_some())
+                    .filter(|a| {
+                        a.enabled
+                            && a.last_synced.is_some()
+                            && (!a.browser_bridge || self.bridge.ready(&a.id))
+                    })
                     .min_by_key(|a| account_load(a, &tasks))
             }
         }
@@ -465,16 +319,7 @@ impl App {
         let mut account = self
             .store
             .account(task.request.account_id.as_deref().context("任务缺少账号")?)?;
-        let session = self
-            .browsers
-            .session(
-                &account.id,
-                &settings.browser_executable,
-                &settings.proxy_url,
-                &account.browser_data_dir,
-                &account.browser_profile,
-            )
-            .await?;
+        let session = self.account_session(&account).await?;
         let mut session = session.lock().await;
         self.verify_login(&mut session, &mut account).await?;
         if account.project_id.is_empty() {
@@ -911,6 +756,7 @@ mod tests {
             credits: None,
             browser_data_dir: String::new(),
             browser_profile: String::new(),
+            browser_bridge: false,
         };
         let first = account("first");
         let second = account("second");

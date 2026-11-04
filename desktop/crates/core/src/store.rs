@@ -39,6 +39,7 @@ impl Store {
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
             CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS browser_connections (account_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE);
             CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS media (filename TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS legacy_records (id TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -77,6 +78,37 @@ impl Store {
             |r| r.get(0),
         )?;
         Ok(serde_json::from_str(&value)?)
+    }
+    pub fn save_browser_connection(&self, account: &Account, token_hash: &str) -> Result<()> {
+        let mut connection = self.connection.lock().unwrap();
+        let tx = connection.transaction()?;
+        tx.execute("INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value", params![account.id, serde_json::to_string(account)?])?;
+        tx.execute(
+            "INSERT OR REPLACE INTO browser_connections(account_id,token_hash) VALUES(?1,?2)",
+            params![account.id, token_hash],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn browser_connection(&self, hash: &str) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT account_id FROM browser_connections WHERE token_hash=?1",
+                [hash],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+    pub fn revoke_browser_connection(&self, id: &str) -> Result<()> {
+        self.connection
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM browser_connections WHERE account_id=?1", [id])?;
+        Ok(())
     }
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
         self.write_settings(&self.connection.lock().unwrap(), settings)
@@ -135,6 +167,7 @@ impl Store {
                         credits: None,
                         browser_data_dir: String::new(),
                         browser_profile: String::new(),
+                        browser_bridge: false,
                     });
                 if account.email != synced.email {
                     account.last_synced = None;

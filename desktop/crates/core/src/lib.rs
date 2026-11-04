@@ -1,4 +1,5 @@
 pub mod api;
+pub mod bridge;
 pub mod browser;
 pub mod catalog;
 pub mod flow;
@@ -29,6 +30,7 @@ struct Server {
 }
 
 pub struct App {
+    pub bridge: bridge::Hub,
     pub store: store::Store,
     status: Mutex<Status>,
     updates: watch::Sender<Status>,
@@ -54,6 +56,7 @@ impl App {
             store.settings()?.max_concurrent,
         ));
         let app = Arc::new(Self {
+            bridge: bridge::Hub::default(),
             browsers: browser::BrowserPool::new(root.join("profiles")),
             store,
             status: Mutex::new(status),
@@ -68,7 +71,25 @@ impl App {
         Ok(app)
     }
     pub fn status(&self) -> Status {
-        self.status.lock().unwrap().clone()
+        let mut status = self.status.lock().unwrap().clone();
+        if let Ok(accounts) = self.store.accounts() {
+            status.ready_accounts = accounts
+                .iter()
+                .filter(|a| {
+                    a.enabled
+                        && a.last_synced.is_some()
+                        && (!a.browser_bridge || self.bridge.ready(&a.id))
+                })
+                .count();
+            if accounts.iter().any(|a| a.enabled && a.browser_bridge) {
+                let connected = accounts
+                    .iter()
+                    .filter(|a| a.enabled && a.browser_bridge && self.bridge.ready(&a.id))
+                    .count();
+                status.browser = format!("默认浏览器：{connected} 个连接可用");
+            }
+        }
+        status
     }
     pub fn subscribe(&self) -> watch::Receiver<Status> {
         self.updates.subscribe()
@@ -86,7 +107,11 @@ impl App {
             s.accounts = accounts.iter().filter(|a| a.enabled).count();
             s.ready_accounts = accounts
                 .iter()
-                .filter(|a| a.enabled && a.last_synced.is_some())
+                .filter(|a| {
+                    a.enabled
+                        && a.last_synced.is_some()
+                        && (!a.browser_bridge || self.bridge.ready(&a.id))
+                })
                 .count();
             s.queued = tasks.iter().filter(|t| t.state == "queued").count();
             s.running = tasks.iter().filter(|t| t.state == "running").count();
@@ -196,6 +221,7 @@ impl App {
             self.shutting_down.store(false, Ordering::SeqCst);
             return Err(error);
         }
+        self.bridge.clear();
         self.browsers.close_all().await;
         self.change_status(|s| s.browser = "已关闭".into());
         Ok(())

@@ -78,6 +78,7 @@ mod tests {
             credits: None,
             browser_data_dir: String::new(),
             browser_profile: String::new(),
+            browser_bridge: false,
         };
         app.store.save_account(&account)?;
         app.refresh()?;
