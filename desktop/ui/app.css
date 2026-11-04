@@ -26,3 +26,8 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:0s!important;animation-duration:0s!important;scroll-behavior:auto!important}}
 ::selection{background:#85dfbf40;color:var(--text)}html{accent-color:var(--focus);caret-color:var(--focus);scrollbar-color:var(--line) var(--bg)}
 .nav-icon{width:17px;height:17px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}nav button.active .nav-icon{stroke:var(--accent)}#page-title{margin-top:0}#page-title:focus{outline:none}#page-title:focus-visible{outline:2px solid var(--focus);outline-offset:4px;border-radius:4px}
+.aside-update{display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px;padding:6px 0;border-top:1px solid var(--line-soft)}
+.version-badge{font-size:11px;font-weight:600;color:var(--accent-text);background:var(--active-bg);border:1px solid var(--active-line);padding:2px 7px;border-radius:4px}
+.update-panel{border:1px solid var(--line-strong)}
+.update-panel .actions{margin-top:14px;display:flex;gap:10px;align-items:center}
+.update-notes{max-height:200px;overflow:auto;background:var(--sunken);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:12px;line-height:1.6;color:var(--text-2);white-space:pre-wrap;margin-top:10px}

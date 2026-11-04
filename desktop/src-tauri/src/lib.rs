@@ -660,6 +660,7 @@ pub fn run() {
                     &MenuItem::with_id(app, "show", "打开 Flow2API", true, None::<&str>)?,
                     &toggle,
                     &MenuItem::with_id(app, "data", "打开数据目录", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "check_update", "检查更新…", true, None::<&str>)?,
                     &autostart_item,
                     &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(app, "quit", "退出 Flow2API", true, None::<&str>)?,
@@ -672,6 +673,10 @@ pub fn run() {
                 .show_menu_on_left_click(cfg!(target_os = "macos"))
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show(app),
+                    "check_update" => {
+                        show(app);
+                        let _ = app.emit("check_update", ());
+                    }
                     "quit" => request_quit(app),
                     "autostart" => {
                         let app = app.clone();

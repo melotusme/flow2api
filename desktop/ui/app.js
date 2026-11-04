@@ -1,5 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
+const APP_VERSION='0.2.2';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio'};
@@ -733,23 +734,107 @@ for(const [id,name] of [['webdav-test','test'],['webdav-push','push'],['webdav-p
 }
 
 let pendingUpdate=null;
-$('check-update').onclick=()=>action($('check-update'),async()=>{
-  const found=await invoke('check_private_update');
-  pendingUpdate=found;
-  if(!found){
-    $('install-update').hidden=true;
-    $('update-status').textContent='已是当前版本。';
-    notice('已是当前版本');
-    return;
+
+function showUpdateDialog(autoCheck=false){
+  let dialog=document.getElementById('update-dialog');
+  if(!dialog){
+    dialog=node('dialog',undefined,'profile-dialog update-dialog');
+    dialog.id='update-dialog';
+    dialog.setAttribute('aria-labelledby','update-dialog-title');
+    const header=node('div',undefined,'section-heading');
+    const headingWrap=node('div');
+    const title=node('h2','软件版本与更新');
+    title.id='update-dialog-title';
+    headingWrap.append(title,node('p',`当前运行版本：v${APP_VERSION}`,'hint'));
+    const closeBtn=button('✕',()=>dialog.close(),'quiet');
+    closeBtn.style.fontSize='16px';
+    header.append(headingWrap,closeBtn);
+
+    const body=node('div');
+    body.style.margin='20px 0';
+    const statusText=node('p','点击“立即检查”将通过本机已登录的 GitHub CLI 检查私有仓库最新版本。','hint');
+    statusText.id='dialog-update-status';
+    const releaseNotes=node('pre',undefined,'update-notes');
+    releaseNotes.id='dialog-update-notes';
+    releaseNotes.style.display='none';
+    body.append(statusText,releaseNotes);
+
+    const actions=node('div',undefined,'actions');
+    const checkBtn=button('立即检查 ↗',()=>runUpdateCheck(checkBtn),'secondary');
+    checkBtn.id='dialog-check-btn';
+    const installBtn=button('立即安装并重启',()=>runInstallUpdate(installBtn),'primary');
+    installBtn.id='dialog-install-btn';
+    installBtn.style.display='none';
+    const cancelBtn=button('关闭',()=>dialog.close(),'secondary');
+    actions.append(checkBtn,installBtn,cancelBtn);
+
+    dialog.append(header,body,actions);
+    dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+    document.body.append(dialog);
   }
-  $('update-status').textContent=`可以安装 ${found.version}（当前 ${found.current_version}）。${found.body||''}`;
-  $('install-update').hidden=false;
-});
-$('install-update').onclick=()=>action($('install-update'),async()=>{
+  dialog.showModal();
+  if(autoCheck)runUpdateCheck(document.getElementById('dialog-check-btn'));
+}
+
+async function runUpdateCheck(triggerBtn){
+  const btns=[triggerBtn,$('check-update'),$('header-check-update'),$('sidebar-check-update'),document.getElementById('dialog-check-btn')].filter(Boolean);
+  btns.forEach(b=>b.disabled=true);
+  const setStatus=(msg,notes=null)=>{
+    $('update-status').textContent=msg;
+    const dialogStatus=document.getElementById('dialog-update-status');
+    const dialogNotes=document.getElementById('dialog-update-notes');
+    if(dialogStatus)dialogStatus.textContent=msg;
+    if(dialogNotes){
+      if(notes){
+        dialogNotes.textContent=notes;
+        dialogNotes.style.display='block';
+      }else{
+        dialogNotes.style.display='none';
+      }
+    }
+  };
+  setStatus('正在连接 GitHub 检查最新版本……');
+  try{
+    const found=await invoke('check_private_update');
+    pendingUpdate=found;
+    if(!found){
+      $('install-update').hidden=true;
+      const dialogInstall=document.getElementById('dialog-install-btn');
+      if(dialogInstall)dialogInstall.style.display='none';
+      const msg=`当前已是最新版本（v${APP_VERSION}）。`;
+      setStatus(msg);
+      if($('update-badge'))$('update-badge').textContent='已是最新';
+      notice(msg);
+      return;
+    }
+    const msg=`发现新版本 v${found.version}（当前 v${found.current_version||APP_VERSION}）。`;
+    setStatus(msg,found.body||'');
+    $('install-update').hidden=false;
+    const dialogInstall=document.getElementById('dialog-install-btn');
+    if(dialogInstall)dialogInstall.style.display='inline-block';
+    if($('update-badge'))$('update-badge').textContent=`可升级至 v${found.version}`;
+    notice(`发现新版本 v${found.version}，可立即更新。`);
+  }catch(err){
+    const msg='检查更新失败：'+(err?.message||err);
+    setStatus(msg);
+    notice(msg,true);
+  }finally{
+    btns.forEach(b=>b.disabled=false);
+  }
+}
+
+async function runInstallUpdate(triggerBtn){
   if(!pendingUpdate)throw Error('请先检查新版本');
-  await invoke('install_private_update');
-  notice('更新已安装。');
-});
+  action(triggerBtn||$('install-update'),async()=>{
+    await invoke('install_private_update');
+    notice('更新包下载校验完成，正在重启应用……');
+  });
+}
+
+$('check-update').onclick=()=>runUpdateCheck($('check-update'));
+$('install-update').onclick=()=>runInstallUpdate($('install-update'));
+if($('header-check-update'))$('header-check-update').onclick=()=>showUpdateDialog(true);
+if($('sidebar-check-update'))$('sidebar-check-update').onclick=()=>showUpdateDialog(true);
 
 (async()=>{
   try{
@@ -757,12 +842,19 @@ $('install-update').onclick=()=>action($('install-update'),async()=>{
     await window.__TAURI__.event.listen('status',event=>updateStatus(event.payload));
     await window.__TAURI__.event.listen('notice',event=>notice(event.payload,String(event.payload).startsWith('无法')));
     await window.__TAURI__.event.listen('account-synced',()=>{refresh().catch(()=>{});});
+    await window.__TAURI__.event.listen('check_update',()=>{showUpdateDialog(true);});
     await window.__TAURI__.event.listen('private-update-progress',event=>{
       const received=event.payload.received,total=event.payload.total;
-      $('update-status').textContent=total?`已下载 ${received} / ${total} 字节`:`已下载 ${received} 字节`;
+      const msg=total?`已下载 ${(received/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB (${Math.round(received/total*100)}%)`:`已下载 ${(received/1048576).toFixed(1)} MB`;
+      $('update-status').textContent=msg;
+      const dialogStatus=document.getElementById('dialog-update-status');
+      if(dialogStatus)dialogStatus.textContent=msg;
     });
     await window.__TAURI__.event.listen('private-update-installing',()=>{
-      $('update-status').textContent='正在校验并安装，当前版本会保留到安装成功。';
+      const msg='正在校验签名并安装，当前版本会保留到安装成功。';
+      $('update-status').textContent=msg;
+      const dialogStatus=document.getElementById('dialog-update-status');
+      if(dialogStatus)dialogStatus.textContent=msg;
     });
     await reloadSettings();
     state.models=(await invoke('models')).data;
