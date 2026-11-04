@@ -94,11 +94,19 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 同步内容是超时、并发，以及账号邮箱、启用状态和项目编号。端口、调用密钥、代理、浏览器路径、开机自启、登录时间和余额留在本机。下载前先把完整本机配置备份到数据目录的 `backups/`，保存失败会回滚这次事务。云端 JSON 只有 HTTPS，没有端到端加密。两台电脑不要同时上传。
 
+## 自动更新（0.3.1 起）
+
+默认开启本机自动更新：启动 30 秒后检查，之后每 6 小时检查一次；失败 30 分钟后重试。原生后台调度在关闭窗口后继续运行。检查时间、下载状态和错误显示在「设置与接入 → 软件版本与更新」。可以在运行设置中关闭自动更新。
+
+私有更新依赖每台电脑自己的 GitHub CLI 登录和发行仓库读取权限。凭据仅由原生后端读取，不进入网页、配置文件、包或日志。资产地址限定到固定仓库的数字 asset ID；跨域 CDN 下载不带凭据。安装前校验包签名及版本，等待执行/排队任务全部结束，再停止 API、安装并重启；安装失败恢复 API。账号资料和数据库留在原目录。
+
+旧版本需要本次从正式 Release 引导安装一次；以后由 App 检查和更新。Linux x64 提供 AppImage，放在可写的用户应用目录（如 `~/.local/opt/flow2api/`），保留可执行权限；运行环境需 WebKitGTK 4.1、GTK3、libayatana-appindicator、FUSE 2（或 `APPIMAGE_EXTRACT_AND_RUN=1`）及已登录的桌面 Secret Service。默认浏览器连接也适用于 Linux Chrome/Chromium。
+
 ## 私有发布与安装
 
 上游源码仓库是公开的 `TheSmallHanCat/flow2api`。当前账号不能向它推送，所以发布构建读取公开 fork `melotusme/flow2api` 上的同一套提交。安装包只发布到私有 `melotusme/flow2api-releases`，Homebrew tap 是私有 `melotusme/homebrew-flow2api`。审阅用流程在 `.github/release-workflow.yml`，执行副本在发布仓库的 `.github/workflows/release.yml`，只接受手动触发。签名私钥在仓库外的 `~/.local/share/flow2api/signing/`，并作为发布仓库 Secret `TAURI_SIGNING_PRIVATE_KEY`。更新签名不是 Apple 公证，也不是 Windows Authenticode。macOS 使用 ad-hoc 签名。Windows 只有 x64 安装包，没有原生 ARM64。
 
-源码提交到远程并且两个平台都构建成功之后，才运行发布仓库的 Publish signed release。缺一个平台不能成为 latest。`v0.2.0` 已正式发布并同步更新 tap 仓库 `Casks/flow2api.rb`（后续新版本发布后，在 tap 仓库执行 `python3 scripts/update-cask.py` 更新校验值并提交）。
+源码提交到远程并且macOS、Windows、Linux 三个平台都构建成功之后，才运行发布仓库的 Publish signed release。缺一个平台不能成为 latest。`v0.2.0` 已正式发布并同步更新 tap 仓库 `Casks/flow2api.rb`（后续新版本发布后，在 tap 仓库执行 `python3 scripts/update-cask.py` 更新校验值并提交）。
 
 macOS，在已有正式 Release 之后：
 
@@ -115,7 +123,7 @@ Windows x64，在已有正式 Release 之后。先安装 GitHub CLI 并 `gh auth
 
 ```powershell
 $repo = 'melotusme/flow2api-releases'
-$tag = 'v0.2.0'
+$tag = 'v0.3.1'
 $asset = 'Flow2API.windows.x64.exe'
 $dir = Join-Path $env:TEMP ('desktop-setup-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $dir | Out-Null

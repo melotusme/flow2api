@@ -24,5 +24,6 @@ rtk proxy xattr -cr "$OUT"
 rtk proxy codesign --force --deep --sign - "$OUT"
 rtk proxy codesign --verify --deep --strict "$OUT"
 rtk proxy mkdir -p "$ROOT/dist"
-rtk proxy ditto -c -k --keepParent --norsrc --noextattr "$OUT" "$ROOT/dist/Flow2API_0.3.0_macOS-arm64-local.zip"
+VERSION=$(rtk proxy python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/desktop/src-tauri/tauri.conf.json")
+rtk proxy ditto -c -k --keepParent --norsrc --noextattr "$OUT" "$ROOT/dist/Flow2API_${VERSION}_macOS-arm64-local.zip"
 rtk proxy printf 'Built local development app: %s\n' "$OUT"

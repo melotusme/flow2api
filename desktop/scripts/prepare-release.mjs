@@ -14,6 +14,9 @@ mkdirSync(out, {recursive: true});
 function copySigned(source, asset) {
   const signaturePath = `${source}.sig`;
   if (!existsSync(signaturePath)) throw new Error(`缺少更新签名：${source}.sig`);
+  const signature = readFileSync(signaturePath, 'utf8').trim();
+  const comment = Buffer.from(signature, 'base64').toString('utf8').split('\n').find(line => line.startsWith('trusted comment:')) || '';
+  if (!comment.endsWith(`\tversion:${config.version}`)) throw new Error('更新签名必须绑定当前版本；使用 Tauri CLI 2.12.4 或更新版本');
   copyFileSync(source, path.join(out, asset));
   copyFileSync(signaturePath, path.join(out, `${asset}.sig`));
   return readFileSync(path.join(out, `${asset}.sig`), 'utf8').trim();
@@ -40,6 +43,12 @@ if (kind === 'darwin-universal') {
   if (exes.length !== 1) throw new Error('需要恰好一个 NSIS 安装包');
   const asset = 'Flow2API.windows.x64.exe';
   writePlatform('windows-x86_64', asset, copySigned(path.join(nsis, exes[0]), asset));
+} else if (kind === 'linux-x86_64') {
+  const dir = path.join(bundle, 'appimage');
+  const images = readdirSync(dir).filter(name => name.endsWith('.AppImage'));
+  if (images.length !== 1) throw new Error('需要恰好一个 Linux AppImage');
+  const asset = 'Flow2API.linux.x64.AppImage';
+  writePlatform('linux-x86_64', asset, copySigned(path.join(dir, images[0]), asset));
 } else {
   throw new Error('不支持的平台');
 }

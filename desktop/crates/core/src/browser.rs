@@ -159,6 +159,16 @@ pub fn executable(configured: &str) -> Result<PathBuf> {
             }
         }
     }
+    if cfg!(target_os = "linux") {
+        for path in [
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+        ] {
+            candidates.push(PathBuf::from(path));
+        }
+    }
     candidates
         .into_iter()
         .find(|path| path.is_file())
@@ -183,6 +193,14 @@ pub fn discover_profiles() -> Vec<BrowserProfile> {
     #[cfg(target_os = "windows")]
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         roots.push(PathBuf::from(local).join("Google/Chrome/User Data"));
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(home) = std::env::var_os("HOME") {
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(home).join(".config"));
+        roots.push(config.join("google-chrome"));
+        roots.push(config.join("chromium"));
     }
     roots
         .into_iter()

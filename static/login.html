@@ -49,9 +49,9 @@
 
     <script>
         const form=document.getElementById('loginForm'),btn=document.getElementById('loginButton'),loginError=document.getElementById('loginError');
-        const showError=message=>{loginError.hidden=!message;loginError.textContent=message||''};
+        const showError=message=>{loginError.hidden=!message;I18n.setRawText(loginError,message||'');loginError.dataset.i18nError='';I18n.apply(loginError)};
         form.addEventListener('input',()=>showError(''));
-        form.addEventListener('submit',async(e)=>{e.preventDefault();showError('');btn.disabled=true;I18n.setMessage(btn,I18n.t("登录中..."));try{const fd=new FormData(form),r=await fetch('/api/login',{method:'POST',credentials:'include',headers:{...I18n.headers(),'Content-Type':'application/json'},body:JSON.stringify({username:fd.get('username'),password:fd.get('password')})});const d=await r.json();if(d.success){location.href='/test'}else showError(d.message||'用户名或密码不正确')}catch(e){showError('网络错误，请稍后再试')}finally{btn.disabled=false;I18n.setMessage(btn,I18n.t("登录"))}});
+        form.addEventListener('submit',async(e)=>{e.preventDefault();showError('');btn.disabled=true;I18n.setMessage(btn,I18n.t("登录中..."));try{const fd=new FormData(form),r=await fetch('/api/login',{method:'POST',credentials:'include',headers:{...I18n.headers(),'Content-Type':'application/json'},body:JSON.stringify({username:fd.get('username'),password:fd.get('password')})});const d=await r.json();if(d.success){location.href='/test'}else showError(d.message||d.detail||I18n.t('登录失败'))}catch(e){showError('网络错误，请稍后再试')}finally{btn.disabled=false;I18n.setMessage(btn,I18n.t("登录"))}});
         window.addEventListener('DOMContentLoaded',()=>{fetch('/api/stats',{credentials:'include'}).then(r=>{if(r.ok)location.href='/test'}).catch(()=>{})});
     </script>
 </body>

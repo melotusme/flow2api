@@ -41,7 +41,7 @@ jobs:
       - run: cargo test --workspace --locked
       - name: Build unsigned desktop bundles
         shell: bash
-        run: npx --yes @tauri-apps/cli@2.10.1 build --ci --no-sign --config '{"bundle":{"createUpdaterArtifacts":false}}' --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+        run: npx --yes @tauri-apps/cli@2.12.4 build --ci --no-sign --config '{"bundle":{"createUpdaterArtifacts":false}}' --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
       # upload-artifact does not preserve Unix modes or app symlinks.
       - if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent target/universal-apple-darwin/release/bundle/macos/Flow2API.app target/universal-apple-darwin/release/bundle/macos/Flow2API-macos-universal.zip

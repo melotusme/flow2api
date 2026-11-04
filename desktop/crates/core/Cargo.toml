@@ -31,3 +31,6 @@ tempfile = "3"
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }

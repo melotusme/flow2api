@@ -4,8 +4,8 @@ pub mod browser;
 pub mod catalog;
 pub mod flow;
 pub mod generation;
-pub mod migration;
 pub mod magpie;
+pub mod migration;
 pub mod model;
 mod monitoring;
 mod request;
@@ -225,6 +225,18 @@ impl App {
         self.bridge.clear();
         self.browsers.close_all().await;
         self.change_status(|s| s.browser = "已关闭".into());
+        Ok(())
+    }
+    /// Restore admission and the previous service state if a verified update
+    /// cannot be installed. Account data and browser profiles remain intact.
+    pub async fn resume_after_failed_update(self: &Arc<Self>, was_running: bool) -> Result<()> {
+        {
+            let _shutdown = self.shutdown_gate.lock().await;
+            self.shutting_down.store(false, Ordering::SeqCst);
+        }
+        if was_running {
+            self.start_service().await?;
+        }
         Ok(())
     }
     pub fn sync_workers(&self, old: usize, new: usize) {

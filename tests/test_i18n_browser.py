@@ -24,9 +24,11 @@ def ui_server():
 
         def do_GET(self):
             path = urlsplit(self.path).path
-            if path in {"/", "/login", "/manage", "/test"}:
+            if path in {"/", "/login", "/manage", "/test", "/model-test"}:
                 name = "login" if path == "/" else path[1:]
                 self.path = "/static/" + name + ".html"
+            elif path.startswith("/assets/"):
+                self.path = "/static" + path
             elif (
                 not path.startswith("/static/")
                 and path
@@ -57,11 +59,11 @@ def ui_server():
 @pytest.fixture
 def browser_page(ui_server):
     with playwright_api.sync_playwright() as playwright:
-        if not Path(playwright.chromium.executable_path).is_file():
-            pytest.skip("Playwright Chromium is not installed")
-        browser = playwright.chromium.launch(headless=True)
+        options = {} if Path(playwright.chromium.executable_path).is_file() else {"channel": "chrome"}
+        browser = playwright.chromium.launch(headless=True, **options)
         context = browser.new_context(locale="en-US")
         page = context.new_page()
+        page.set_default_timeout(8000)
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.route(
@@ -234,7 +236,7 @@ def test_login_language_persists_and_failure_restores_button(browser_page):
     page.reload()
     page.wait_for_load_state("networkidle")
     assert page.locator("html").get_attribute("lang") == "zh-CN"
-    open_page(page, base + "/test")
+    open_page(page, base + "/model-test")
     assert page.locator("html").get_attribute("lang") == "zh-CN"
 
 
@@ -242,8 +244,9 @@ def test_management_switch_preserves_forms_and_log_payload(browser_page):
     page, base = browser_page
     open_page(page, base + "/manage")
     page.wait_for_function("typeof window.openAddModal === 'function'")
-    playwright_api.expect(page.locator("#tabTokens")).to_have_text("Token Management")
+    playwright_api.expect(page.locator("#accountSearch")).to_be_visible()
     page.evaluate("openAddModal()")
+    page.locator("#addTokenRemark").evaluate("el => { el.closest('details').open = true; }")
     page.locator("#addTokenRemark").fill("保存")
     page.locator("#addTokenGoogleCookies").fill("SID=local-test")
     page.locator("[data-language-select]").select_option("zh-CN")
@@ -301,11 +304,9 @@ def test_log_status_colors_do_not_depend_on_language(browser_page):
     for language in ["en", "zh-CN", "en"]:
         page.locator("[data-language-select]").select_option(language)
         for index, classes in enumerate(expected):
-            badge = rows.nth(index).locator("td").nth(2).locator("span").first
+            badge_classes = page.evaluate("record => formatLogStatusClass(record)", records[index])
             for css_class in classes.split():
-                playwright_api.expect(badge).to_have_class(
-                    re.compile(r"\b" + css_class + r"\b")
-                )
+                assert css_class in badge_classes.split()
     assert len(requests) == 1
     assert page.evaluate("window.allLogs") == records
 
@@ -464,28 +465,17 @@ def test_historical_log_messages_localize_without_changing_raw_payloads(browser_
     page.evaluate("switchTab('logs')")
     rows = page.locator("#logsTableBody tr")
     playwright_api.expect(rows).to_have_count(3)
-    playwright_api.expect(page.locator("#panelLogs thead th").first).to_have_text(
-        "Operation"
-    )
-    playwright_api.expect(rows.first.locator("td").first).to_have_text("Generate video")
     playwright_api.expect(rows.first.locator("button")).to_have_text("Details")
     expected = (
         "Generation failed: Video generation succeeded, but the media URL could not be retrieved: "
         + diagnostic
     )
-    assert (
-        rows.first.locator("td").nth(5).locator("div").get_attribute("title")
-        == expected
-    )
-    assert rows.nth(1).locator("td").nth(5).locator("div").get_attribute("title") == (
+    assert rows.first.locator("td").nth(1).locator("div").get_attribute("title") == expected
+    assert rows.nth(1).locator("td").nth(1).locator("div").get_attribute("title") == (
         "This model requires the Ult tier, but no Ult account is available: " + model
     )
-    playwright_api.expect(rows.nth(2).locator("td").first).to_have_text(
-        "custom_operation"
-    )
-    playwright_api.expect(rows.nth(2).locator("td").nth(5)).to_have_text("保存")
+    playwright_api.expect(rows.nth(2).locator("td").nth(1)).to_have_text("保存")
     assert page.evaluate("window.allLogs[0].error_summary") == nested_error
-    assert rows.first.locator("td").first.get_attribute("title") == "generate_video"
     rows.first.locator("button").click()
     error = page.locator("#logDetailContent [data-i18n-error]")
     playwright_api.expect(error).to_have_text(expected)
@@ -495,7 +485,6 @@ def test_historical_log_messages_localize_without_changing_raw_payloads(browser_
     page.locator("[data-language-select]").select_option("zh-CN")
     playwright_api.expect(error).to_have_text(nested_error)
     playwright_api.expect(rows.first.locator("button")).to_have_text("详情")
-    playwright_api.expect(rows.first.locator("td").first).to_have_text("生成视频")
     assert page.locator("#logDetailContent pre").all_text_contents() == raw_payloads
 
 
@@ -510,7 +499,7 @@ def test_model_switch_preserves_uploads_and_inflight_generation(browser_page):
     )
     pending = []
     page.route("**/v1/chat/completions", lambda route: pending.append(route))
-    open_page(page, base + "/test")
+    open_page(page, base + "/model-test")
     page.wait_for_selector('.model-item[data-model="gemini-3.1-flash-image"]')
     page.locator('.model-item[data-model="gemini-3.1-flash-image"]').click()
     page.locator("#promptInput").fill("保存")
@@ -605,7 +594,7 @@ def test_extension_language_preserves_settings_and_translates_status(browser_pag
 
 def test_upscaled_video_models_keep_reference_uploads(browser_page):
     page, base = browser_page
-    open_page(page, base + "/test")
+    open_page(page, base + "/model-test")
     image = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jNekAAAAASUVORK5CYII="
     )
@@ -626,7 +615,7 @@ def test_upscaled_video_models_keep_reference_uploads(browser_page):
 
 def test_upsample_heading_keeps_both_translations(browser_page):
     page, base = browser_page
-    open_page(page, base + "/test")
+    open_page(page, base + "/model-test")
     heading = page.locator('.section-title[data-category="视频放大 (Upsample)"]')
     playwright_api.expect(heading).to_contain_text("Video upscaling (Upsample)")
     page.locator("[data-language-select]").select_option("zh-CN")
@@ -663,7 +652,7 @@ def test_extend_requires_source_and_sends_backend_compatible_reference(browser_p
         )
 
     page.route("**/v1/chat/completions", generate_response)
-    open_page(page, base + "/test")
+    open_page(page, base + "/model-test")
     page.locator("#apiKey").fill("local-test-key")
     page.locator("#apiKey").press("Tab")
     page.locator(f'.model-item[data-model="{models[0]}"]').click()
@@ -754,7 +743,7 @@ def test_model_tester_displays_all_published_models(browser_page):
             content_type="application/json", body=json.dumps({"data": models})
         ),
     )
-    open_page(page, base + "/test")
+    open_page(page, base + "/model-test")
     page.locator("#apiKey").fill("local-test-key")
     page.locator("#apiKey").press("Tab")
     items = page.locator(".model-item")

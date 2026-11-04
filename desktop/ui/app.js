@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.3.0';
+const APP_VERSION='0.3.1';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -697,7 +697,7 @@ async function reloadSettings(){
   state.settings=await invoke('settings');
   for(const [key,value]of Object.entries(state.settings)){
     const input=$('settings-form').elements.namedItem(key);
-    if(input)input.value=value;
+    if(input){if(input.type==='checkbox')input.checked=Boolean(value);else input.value=value;}
   }
   $('base-url').textContent=`http://127.0.0.1:${state.settings.port}/v1`;
   await loadMagpie();
@@ -830,6 +830,7 @@ $('settings-form').onsubmit=event=>{
   action(event.submitter,async()=>{
     const form=new FormData(event.currentTarget);
     const settings=Object.fromEntries(form);
+    settings.auto_update=form.has('auto_update');
     for(const name of ['port','max_concurrent','image_timeout_seconds','video_timeout_seconds'])settings[name]=Number(settings[name]);
     await invoke('save_settings',{settings});
     state.settings=settings;
@@ -886,6 +887,15 @@ for(const [id,name] of [['webdav-test','test'],['webdav-push','push'],['webdav-p
     showWebdav(await invoke('webdav_config'));
     notice(message);
   });
+}
+
+function renderUpdateStatus(status){
+  if(!status?.message)return;
+  const checked=status.checked_at?` 上次检查：${new Date(status.checked_at*1000).toLocaleString()}。`:'';
+  $('update-status').textContent=status.message+checked;
+  const dialogStatus=document.getElementById('dialog-update-status');
+  if(dialogStatus)dialogStatus.textContent=status.message+checked;
+  if($('update-badge'))$('update-badge').textContent=({error:'更新失败',checking:'检查中',current:'已是最新',available:'有新版本',waiting:'等待空闲',downloading:'下载中',installing:'安装中'})[status.phase]||'检查更新';
 }
 
 let pendingUpdate=null;
@@ -1011,11 +1021,13 @@ if($('sidebar-check-update'))$('sidebar-check-update').onclick=()=>showUpdateDia
       const dialogStatus=document.getElementById('dialog-update-status');
       if(dialogStatus)dialogStatus.textContent=msg;
     });
+    await window.__TAURI__.event.listen('private-update-status',event=>renderUpdateStatus(event.payload));
+    renderUpdateStatus(await invoke('private_update_status'));
     await reloadSettings();
     await restoreDraft();
     state.models=(await invoke('models')).data;
     renderModels();
-    $('platform').textContent=navigator.userAgent.includes('Mac')?'macOS · 菜单栏运行':'Windows · 托盘运行';
+    $('platform').textContent=navigator.userAgent.includes('Mac')?'macOS · 菜单栏运行':navigator.userAgent.includes('Windows')?'Windows · 托盘运行':'Linux · 托盘运行';
     await refresh();
     loadDevice().catch(error=>notice('设备设置读取失败：'+error,true));
     let polling=false;

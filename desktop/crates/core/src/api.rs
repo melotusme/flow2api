@@ -734,6 +734,21 @@ mod tests {
         // Repeated shutdown requests remain harmless.
         app.shutdown().await?;
         assert_eq!(app.status().service, "stopped");
+        // A failed updater installation restores admission and the API, without
+        // changing credentials or resubmitting interrupted tasks.
+        let before = app.store.settings()?;
+        app.resume_after_failed_update(true).await?;
+        assert_eq!(app.status().service, "running");
+        assert_eq!(app.store.settings()?.api_key, before.api_key);
+        assert_eq!(
+            client
+                .get(format!("{address}/health"))
+                .send()
+                .await?
+                .status(),
+            200
+        );
+        app.shutdown().await?;
         assert!(
             tokio::net::TcpStream::connect(address.trim_start_matches("http://"))
                 .await

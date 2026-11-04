@@ -15,6 +15,7 @@ pub struct Settings {
     pub image_timeout_seconds: u64,
     pub video_timeout_seconds: u64,
     pub proxy_url: String,
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -27,6 +28,7 @@ impl Default for Settings {
             image_timeout_seconds: 300,
             video_timeout_seconds: 1500,
             proxy_url: String::new(),
+            auto_update: true,
         }
     }
 }

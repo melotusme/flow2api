@@ -42,13 +42,20 @@ async fn save_settings(state: tauri::State<'_, Desktop>, settings: Settings) -> 
     result(&state.core, state.core.save_settings(settings).await)
 }
 #[tauri::command]
-fn magpie_status(state: tauri::State<Desktop>) -> Result<flow2api_core::magpie::Connection, String> {
+fn magpie_status(
+    state: tauri::State<Desktop>,
+) -> Result<flow2api_core::magpie::Connection, String> {
     let path = flow2api_core::magpie::config_path().map_err(|e| e.to_string())?;
-    flow2api_core::magpie::inspect(&path, &state.core.store.settings().map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    flow2api_core::magpie::inspect(
+        &path,
+        &state.core.store.settings().map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 #[tauri::command]
-async fn connect_magpie(state: tauri::State<'_, Desktop>) -> Result<flow2api_core::magpie::Connection, String> {
+async fn connect_magpie(
+    state: tauri::State<'_, Desktop>,
+) -> Result<flow2api_core::magpie::Connection, String> {
     result(&state.core, state.core.start_service().await)?;
     let _gate = state.core.job_gate.lock().await;
     let path = flow2api_core::magpie::config_path().map_err(|e| e.to_string())?;
@@ -617,6 +624,7 @@ pub fn run() {
                 webdav: tokio::sync::Mutex::new(()),
                 autostart_item: Mutex::new(None),
             });
+            updates::start(app.handle().clone());
             let autostart_now = app.autolaunch().is_enabled();
             let summary =
                 MenuItem::with_id(app, "summary", status.tray_summary(), false, None::<&str>)?;
@@ -830,6 +838,7 @@ pub fn run() {
             save_webdav,
             import_verge_webdav,
             webdav_action,
+            updates::private_update_status,
             updates::check_private_update,
             updates::install_private_update
         ])
