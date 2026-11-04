@@ -195,8 +195,12 @@ impl App {
         }
         let mut cdp_cookies = Vec::new();
         for c in cookies {
-            let Some(name) = c.get("name").and_then(|v| v.as_str()) else { continue; };
-            let Some(value) = c.get("value").and_then(|v| v.as_str()) else { continue; };
+            let Some(name) = c.get("name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(value) = c.get("value").and_then(|v| v.as_str()) else {
+                continue;
+            };
             let mut obj = json!({
                 "name": name,
                 "value": value,
@@ -210,10 +214,18 @@ impl App {
             if let Some(secure) = c.get("secure").and_then(|v| v.as_bool()) {
                 obj["secure"] = json!(secure);
             }
-            if let Some(http_only) = c.get("httpOnly").or_else(|| c.get("http_only")).and_then(|v| v.as_bool()) {
+            if let Some(http_only) = c
+                .get("httpOnly")
+                .or_else(|| c.get("http_only"))
+                .and_then(|v| v.as_bool())
+            {
                 obj["httpOnly"] = json!(http_only);
             }
-            if let Some(expires) = c.get("expirationDate").or_else(|| c.get("expires")).and_then(|v| v.as_f64()) {
+            if let Some(expires) = c
+                .get("expirationDate")
+                .or_else(|| c.get("expires"))
+                .and_then(|v| v.as_f64())
+            {
                 obj["expires"] = json!(expires);
             }
             cdp_cookies.push(obj);
@@ -223,23 +235,40 @@ impl App {
         }
 
         let existing = if let Some(e) = email.filter(|s| !s.trim().is_empty()) {
-            self.store.accounts()?.into_iter().find(|a| a.email.eq_ignore_ascii_case(e.trim()))
+            self.store
+                .accounts()?
+                .into_iter()
+                .find(|a| a.email.eq_ignore_ascii_case(e.trim()))
         } else {
             None
         };
 
-        let id = existing.as_ref().map(|a| a.id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let id = existing
+            .as_ref()
+            .map(|a| a.id.clone())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let settings = self.store.settings()?;
-        let session = self.browsers.session(
-            &id,
-            &settings.browser_executable,
-            &settings.proxy_url,
-            existing.as_ref().map(|a| a.browser_data_dir.as_str()).unwrap_or(""),
-            existing.as_ref().map(|a| a.browser_profile.as_str()).unwrap_or(""),
-        ).await?;
+        let session = self
+            .browsers
+            .session(
+                &id,
+                &settings.browser_executable,
+                &settings.proxy_url,
+                existing
+                    .as_ref()
+                    .map(|a| a.browser_data_dir.as_str())
+                    .unwrap_or(""),
+                existing
+                    .as_ref()
+                    .map(|a| a.browser_profile.as_str())
+                    .unwrap_or(""),
+            )
+            .await?;
 
         let mut session = session.lock().await;
-        session.call("Network.setCookies", json!({ "cookies": cdp_cookies })).await?;
+        session
+            .call("Network.setCookies", json!({ "cookies": cdp_cookies }))
+            .await?;
         session.navigate("https://flow.google.com/projects").await?;
 
         let mut detected_email = None;
@@ -260,10 +289,17 @@ impl App {
             _ => bail!("未能从 Flow 页面识别到登录账号，请确认已在浏览器中正常登录 Flow"),
         };
 
-        let credits = flow::rpc(&mut session, "nzlxg", json!([]), None).await.ok()
+        let credits = flow::rpc(&mut session, "nzlxg", json!([]), None)
+            .await
+            .ok()
             .and_then(|c| c.as_array().and_then(|a| a.iter().find_map(Value::as_i64)));
 
-        let account = match self.store.accounts()?.into_iter().find(|a| a.email.eq_ignore_ascii_case(&target_email)) {
+        let account = match self
+            .store
+            .accounts()?
+            .into_iter()
+            .find(|a| a.email.eq_ignore_ascii_case(&target_email))
+        {
             Some(mut acc) => {
                 acc.credits = credits;
                 acc.last_synced = Some(now());
@@ -278,7 +314,7 @@ impl App {
                 credits,
                 browser_data_dir: String::new(),
                 browser_profile: String::new(),
-            }
+            },
         };
 
         self.store.save_account(&account)?;

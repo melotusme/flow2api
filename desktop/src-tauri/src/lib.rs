@@ -160,7 +160,10 @@ async fn open_login(
 }
 /// One click: open a fresh Chrome on Google sign-in; the email is detected automatically.
 #[tauri::command]
-async fn quick_login(app: tauri::AppHandle, state: tauri::State<'_, Desktop>) -> Result<(), String> {
+async fn quick_login(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Desktop>,
+) -> Result<(), String> {
     let id = result(&state.core, state.core.start_quick_login().await)?;
     watch_login(app, state.core.clone(), id, true);
     Ok(())
@@ -356,14 +359,38 @@ fn open_chrome_download(app: tauri::AppHandle) -> Result<(), String> {
 fn ensure_extension_files(root: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let dir = root.join("extension");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let _ = std::fs::write(dir.join("manifest.json"), include_str!("../../crates/core/assets/extension/manifest.json"));
-    let _ = std::fs::write(dir.join("popup.html"), include_str!("../../crates/core/assets/extension/popup.html"));
-    let _ = std::fs::write(dir.join("popup.js"), include_str!("../../crates/core/assets/extension/popup.js"));
-    let _ = std::fs::write(dir.join("content.js"), include_str!("../../crates/core/assets/extension/content.js"));
-    let _ = std::fs::write(dir.join("background.js"), include_str!("../../crates/core/assets/extension/background.js"));
-    let _ = std::fs::write(dir.join("options.html"), include_str!("../../crates/core/assets/extension/options.html"));
-    let _ = std::fs::write(dir.join("options.js"), include_str!("../../crates/core/assets/extension/options.js"));
-    let _ = std::fs::write(dir.join("flow2api-flow-login-sync.user.js"), include_str!("../../crates/core/assets/extension/flow2api-flow-login-sync.user.js"));
+    let _ = std::fs::write(
+        dir.join("manifest.json"),
+        include_str!("../../crates/core/assets/extension/manifest.json"),
+    );
+    let _ = std::fs::write(
+        dir.join("popup.html"),
+        include_str!("../../crates/core/assets/extension/popup.html"),
+    );
+    let _ = std::fs::write(
+        dir.join("popup.js"),
+        include_str!("../../crates/core/assets/extension/popup.js"),
+    );
+    let _ = std::fs::write(
+        dir.join("content.js"),
+        include_str!("../../crates/core/assets/extension/content.js"),
+    );
+    let _ = std::fs::write(
+        dir.join("background.js"),
+        include_str!("../../crates/core/assets/extension/background.js"),
+    );
+    let _ = std::fs::write(
+        dir.join("options.html"),
+        include_str!("../../crates/core/assets/extension/options.html"),
+    );
+    let _ = std::fs::write(
+        dir.join("options.js"),
+        include_str!("../../crates/core/assets/extension/options.js"),
+    );
+    let _ = std::fs::write(
+        dir.join("flow2api-flow-login-sync.user.js"),
+        include_str!("../../crates/core/assets/extension/flow2api-flow-login-sync.user.js"),
+    );
     Ok(dir)
 }
 #[tauri::command]
@@ -380,7 +407,9 @@ async fn install_chrome_extension(
     let mut command = std::process::Command::new(executable);
     command.arg(format!("--load-extension={}", ext_dir.display()));
     command.arg("https://flow.google.com/");
-    command.spawn().map_err(|e| format!("启动 Chrome 失败: {e}"))?;
+    command
+        .spawn()
+        .map_err(|e| format!("启动 Chrome 失败: {e}"))?;
 
     Ok(ext_dir.to_string_lossy().into_owned())
 }
@@ -391,17 +420,18 @@ fn open_extension_folder(
 ) -> Result<String, String> {
     let root = state.core.store.root.clone();
     let ext_dir = ensure_extension_files(&root)?;
-    let _ = app.opener().open_path(ext_dir.to_string_lossy(), None::<&str>);
+    let _ = app
+        .opener()
+        .open_path(ext_dir.to_string_lossy(), None::<&str>);
     Ok(ext_dir.to_string_lossy().into_owned())
 }
 #[tauri::command]
-fn open_userscript_url(
-    app: tauri::AppHandle,
-    state: tauri::State<Desktop>,
-) -> Result<(), String> {
+fn open_userscript_url(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
     let port = state.core.store.settings().map(|s| s.port).unwrap_or(8000);
     let url = format!("http://127.0.0.1:{port}/extension/flow2api-flow-login-sync.user.js");
-    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn open_data(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {

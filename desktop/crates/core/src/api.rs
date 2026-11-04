@@ -465,8 +465,12 @@ async fn sync_browser_login(
     Json(payload): Json<SyncBrowserLoginPayload>,
 ) -> Result<Response, ApiError> {
     let cookies_val: Vec<Value> = match payload.google_cookies {
-        Value::String(s) => serde_json::from_str(&s)
-            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("Cookie JSON 解析失败: {e}")))?,
+        Value::String(s) => serde_json::from_str(&s).map_err(|e| {
+            ApiError(
+                StatusCode::BAD_REQUEST,
+                format!("Cookie JSON 解析失败: {e}"),
+            )
+        })?,
         Value::Array(arr) => arr,
         _ => Vec::new(),
     };
@@ -782,7 +786,10 @@ mod tests {
             .body(Body::empty())?;
         let resp: Response = router(app.clone()).oneshot(options_req).await?;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-        assert_eq!(resp.headers().get("access-control-allow-origin").unwrap(), "*");
+        assert_eq!(
+            resp.headers().get("access-control-allow-origin").unwrap(),
+            "*"
+        );
 
         // 2. Userscript served
         let userscript_req = axum::http::Request::builder()
