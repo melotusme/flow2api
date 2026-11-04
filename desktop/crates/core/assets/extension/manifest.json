@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Flow2API Flow 登录同步",
+  "version": "1.0.1",
+  "description": "将当前 Chrome 中已登录的 Flow Cookie 同步到 Flow2API。",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://labs.google/*",
+    "https://*.google.com/*",
+    "http://*.google.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "同步 Flow 登录态",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://labs.google/*",
+        "https://flow.google.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html"
+}

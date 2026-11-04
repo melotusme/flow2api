@@ -106,6 +106,189 @@ impl App {
         self.refresh()?;
         Ok(account)
     }
+    /// One-click login: open a fresh standalone Chrome profile on the Google sign-in page
+    /// without asking for an email first. Returns the pending id; the account is only
+    /// persisted once `try_finish_quick_login` detects the signed-in email.
+    pub async fn start_quick_login(&self) -> Result<String> {
+        let _admission = self.job_gate.lock().await;
+        self.ensure_available()?;
+        if self.status().busy() {
+            bail!("请等待生成任务完成后登录账号");
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let settings = self.store.settings()?;
+        let session = self
+            .browsers
+            .session(
+                &id,
+                &settings.browser_executable,
+                &settings.proxy_url,
+                "",
+                "",
+            )
+            .await?;
+        let mut session = session.lock().await;
+        session
+            .navigate("https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fflow.google.com%2Fprojects")
+            .await
+            .ok();
+        session.call("Page.bringToFront", json!({})).await?;
+        self.change_status(|s| s.browser = "Chrome 已打开，等待 Google 登录".into());
+        Ok(id)
+    }
+    /// Ok(None): still waiting. Ok(Some): account saved (synced if credits were readable).
+    /// Err: login detected but cannot be used (e.g. account already added).
+    pub async fn try_finish_quick_login(&self, id: &str) -> Result<Option<Account>> {
+        let Ok(_admission) = self.job_gate.try_lock() else {
+            return Ok(None);
+        };
+        if self.ensure_available().is_err() || self.status().busy() {
+            return Ok(None);
+        }
+        let Some(session) = self.browsers.existing_session(id).await else {
+            return Ok(None);
+        };
+        let mut session = session.lock().await;
+        let Ok(Some(email)) = session.detect_email().await else {
+            return Ok(None);
+        };
+        if self
+            .store
+            .accounts()?
+            .iter()
+            .any(|a| a.email.eq_ignore_ascii_case(&email))
+        {
+            bail!("{email} 已在账号列表中，请直接在该账号上点“打开登录窗口”");
+        }
+        let mut account = Account {
+            id: id.into(),
+            email,
+            enabled: true,
+            project_id: String::new(),
+            last_synced: None,
+            credits: None,
+            browser_data_dir: String::new(),
+            browser_profile: String::new(),
+        };
+        if let Ok(credits) = flow::rpc(&mut session, "nzlxg", json!([]), None).await {
+            account.credits = credits
+                .as_array()
+                .and_then(|a| a.iter().find_map(Value::as_i64));
+            account.last_synced = Some(now());
+        }
+        self.store.save_account(&account)?;
+        self.change_status(|s| {
+            s.browser = format!("已连接 {}", account.email);
+            s.last_error = None;
+        });
+        self.refresh()?;
+        Ok(Some(account))
+    }
+    /// Import cookies exported from the Chrome extension or UserScript.
+    /// Injects cookies into a dedicated browser profile via CDP, navigates to Flow,
+    /// verifies login / reads credits, and saves the account.
+    pub async fn sync_cookies(&self, email: Option<&str>, cookies: &[Value]) -> Result<Account> {
+        let _admission = self.job_gate.lock().await;
+        self.ensure_available()?;
+        if self.status().busy() {
+            bail!("请等待当前生成任务完成后导入账号");
+        }
+        let mut cdp_cookies = Vec::new();
+        for c in cookies {
+            let Some(name) = c.get("name").and_then(|v| v.as_str()) else { continue; };
+            let Some(value) = c.get("value").and_then(|v| v.as_str()) else { continue; };
+            let mut obj = json!({
+                "name": name,
+                "value": value,
+            });
+            if let Some(domain) = c.get("domain").and_then(|v| v.as_str()) {
+                obj["domain"] = json!(domain);
+            }
+            if let Some(path) = c.get("path").and_then(|v| v.as_str()) {
+                obj["path"] = json!(path);
+            }
+            if let Some(secure) = c.get("secure").and_then(|v| v.as_bool()) {
+                obj["secure"] = json!(secure);
+            }
+            if let Some(http_only) = c.get("httpOnly").or_else(|| c.get("http_only")).and_then(|v| v.as_bool()) {
+                obj["httpOnly"] = json!(http_only);
+            }
+            if let Some(expires) = c.get("expirationDate").or_else(|| c.get("expires")).and_then(|v| v.as_f64()) {
+                obj["expires"] = json!(expires);
+            }
+            cdp_cookies.push(obj);
+        }
+        if cdp_cookies.is_empty() {
+            bail!("未找到有效的 Cookie 数据");
+        }
+
+        let existing = if let Some(e) = email.filter(|s| !s.trim().is_empty()) {
+            self.store.accounts()?.into_iter().find(|a| a.email.eq_ignore_ascii_case(e.trim()))
+        } else {
+            None
+        };
+
+        let id = existing.as_ref().map(|a| a.id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let settings = self.store.settings()?;
+        let session = self.browsers.session(
+            &id,
+            &settings.browser_executable,
+            &settings.proxy_url,
+            existing.as_ref().map(|a| a.browser_data_dir.as_str()).unwrap_or(""),
+            existing.as_ref().map(|a| a.browser_profile.as_str()).unwrap_or(""),
+        ).await?;
+
+        let mut session = session.lock().await;
+        session.call("Network.setCookies", json!({ "cookies": cdp_cookies })).await?;
+        session.navigate("https://flow.google.com/projects").await?;
+
+        let mut detected_email = None;
+        for _ in 0..15 {
+            if let Ok(Some(e)) = session.detect_email().await {
+                detected_email = Some(e);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        let target_email = match (detected_email, email) {
+            (Some(e), _) => e,
+            (None, Some(e)) if !e.trim().is_empty() => {
+                session.verify_account(e.trim()).await?;
+                e.trim().to_lowercase()
+            }
+            _ => bail!("未能从 Flow 页面识别到登录账号，请确认已在浏览器中正常登录 Flow"),
+        };
+
+        let credits = flow::rpc(&mut session, "nzlxg", json!([]), None).await.ok()
+            .and_then(|c| c.as_array().and_then(|a| a.iter().find_map(Value::as_i64)));
+
+        let account = match self.store.accounts()?.into_iter().find(|a| a.email.eq_ignore_ascii_case(&target_email)) {
+            Some(mut acc) => {
+                acc.credits = credits;
+                acc.last_synced = Some(now());
+                acc
+            }
+            None => Account {
+                id: id.clone(),
+                email: target_email.clone(),
+                enabled: true,
+                project_id: String::new(),
+                last_synced: Some(now()),
+                credits,
+                browser_data_dir: String::new(),
+                browser_profile: String::new(),
+            }
+        };
+
+        self.store.save_account(&account)?;
+        self.change_status(|s| {
+            s.browser = format!("已从扩展连接 {}", account.email);
+            s.last_error = None;
+        });
+        self.refresh()?;
+        Ok(account)
+    }
     pub async fn try_auto_sync(&self, id: &str) -> Result<Option<Account>> {
         let Ok(_admission) = self.job_gate.try_lock() else {
             return Ok(None);

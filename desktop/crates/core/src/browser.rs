@@ -210,6 +210,18 @@ impl BrowserPool {
             None
         }
     }
+    /// Close a session that never became an account and remove its app-owned profile.
+    /// Only app-created standalone profiles (root/<uuid>) are ever removed.
+    pub async fn discard(&self, id: &str) {
+        if uuid::Uuid::parse_str(id).is_err() {
+            return;
+        }
+        let session = self.sessions.lock().await.remove(id);
+        if let Some(session) = session {
+            session.lock().await.close().await;
+        }
+        let _ = tokio::fs::remove_dir_all(self.root.join(id)).await;
+    }
     pub async fn close_all(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock().await);
         for session in sessions.into_values() {
@@ -416,6 +428,16 @@ impl Session {
             bail!("浏览器登录账号与所选邮箱不一致或尚未登录，请在专用 Chrome 中确认账号后同步");
         }
         Ok(())
+    }
+    /// Read the signed-in Google email from the Flow page's account avatar label,
+    /// e.g. "Google Account: Name (user@gmail.com)". Returns None until signed in on Flow.
+    pub async fn detect_email(&mut self) -> Result<Option<String>> {
+        let value = self
+            .evaluate(
+                r#"(()=>{if(location.hostname!=='flow.google.com')return null;for(const el of document.querySelectorAll('[aria-label]')){const m=(el.getAttribute('aria-label')||'').match(/\(([^()\s]+@[^()\s]+\.[^()\s]+)\)/);if(m)return m[1].toLowerCase();}return null})()"#,
+            )
+            .await?;
+        Ok(value.as_str().map(str::to_owned))
     }
     pub async fn project(&mut self, id: &str, email: &str) -> Result<()> {
         uuid::Uuid::parse_str(id).context("Flow 项目 ID 格式错误")?;

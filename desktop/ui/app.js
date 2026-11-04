@@ -11,6 +11,8 @@ let legacyPath;
 function notice(message,error=false){
   $('notice').textContent=String(message);
   $('notice').className=error?'error':'';
+  $('notice').setAttribute('role',error?'alert':'status');
+  $('notice').setAttribute('aria-live',error?'assertive':'polite');
   $('notice').hidden=false;
   clearTimeout(noticeTimer);
   if(!error)noticeTimer=setTimeout(()=>$('notice').hidden=true,6500);
@@ -208,12 +210,19 @@ function createListView(config){
   };
 }
 
-function page(name){
+function page(name,{focus=true}={}){
   state.page=name;
   document.querySelectorAll('.page').forEach(element=>element.hidden=element.id!==name);
-  document.querySelectorAll('[data-page]').forEach(element=>element.classList.toggle('active',element.dataset.page===name));
+  document.querySelectorAll('[data-page]').forEach(element=>{
+    const active=element.dataset.page===name;
+    element.classList.toggle('active',active);
+    if(active)element.setAttribute('aria-current','page');
+    else element.removeAttribute('aria-current');
+  });
   $('page-title').textContent=titles[name];
+  if(focus)$('page-title').focus({preventScroll:true});
 }
+page(state.page,{focus:false});
 document.querySelectorAll('[data-page]').forEach(element=>element.onclick=()=>page(element.dataset.page));
 document.querySelectorAll('[data-go]').forEach(element=>element.onclick=()=>page(element.dataset.go));
 
@@ -668,6 +677,22 @@ $('choose-browser').onclick=()=>action($('choose-browser'),async()=>{
   const path=await invoke('choose_browser');
   if(path)$('settings-form').elements.namedItem('browser_executable').value=path;
   notice('已填入浏览器路径，点击“保存并生效”自动应用。');
+});
+$('quick-login').onclick=()=>action($('quick-login'),async()=>{
+  await invoke('quick_login');
+  notice('已打开 Chrome，请登录 Google 账号。登录完成后应用会自动识别邮箱并同步，无需其他操作。');
+});
+$('install-extension').onclick=()=>action($('install-extension'),async()=>{
+  const path=await invoke('install_chrome_extension');
+  notice(`已为你启动 Chrome 并自动挂载扩展（目录：${path}）。\n若需永久安装，可开启 chrome://extensions 开发者模式后将该目录拖入。`);
+});
+$('open-userscript').onclick=()=>action($('open-userscript'),async()=>{
+  await invoke('open_userscript_url');
+  notice('已在浏览器中打开油猴脚本安装页面。若已安装 Tampermonkey 扩展，将直接弹出安装提示。');
+});
+$('open-extension-dir').onclick=()=>action($('open-extension-dir'),async()=>{
+  const path=await invoke('open_extension_folder');
+  notice(`已打开扩展目录：${path}。\n在 Chrome 打开 chrome://extensions 并开启「开发者模式」，拖入此目录即可。`);
 });
 $('download-chrome').onclick=()=>action($('download-chrome'),()=>invoke('open_chrome_download'));
 

@@ -1,70 +1,20 @@
-console.log("[Flow2API] Captcha Worker injected.");
+console.log("[Flow2API] Extension Content script ready.");
 
-function getRecaptchaToken(action) {
-    return new Promise((resolve, reject) => {
-        const reqId = Date.now() + Math.random().toString();
-        const script = document.createElement("script");
-        script.textContent = `
-            try {
-                function runCaptcha() {
-                    grecaptcha.enterprise.ready(function() {
-                        grecaptcha.enterprise.execute('6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV', {action: '${action}'})
-                            .then(token => window.postMessage({type: 'reCAPTCHA_result', reqId: '${reqId}', token: token}, '*'))
-                            .catch(err => window.postMessage({type: 'reCAPTCHA_error', reqId: '${reqId}', error: err.message}, '*'));
-                    });
-                }
-                
-                if (typeof grecaptcha !== "undefined" && grecaptcha.enterprise) {
-                    runCaptcha();
-                } else {
-                    const rScript = document.createElement('script');
-                    rScript.src = "https://www.google.com/recaptcha/enterprise.js?render=6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV";
-                    rScript.onload = () => { runCaptcha(); };
-                    rScript.onerror = () => { window.postMessage({type: 'reCAPTCHA_error', reqId: '${reqId}', error: 'Failed to load enterprise.js'}, '*'); };
-                    document.head.appendChild(rScript);
-                }
-            } catch (e) {
-                window.postMessage({type: 'reCAPTCHA_error', reqId: '${reqId}', error: e.message}, '*');
-            }
-        `;
-        
-        const listener = (event) => {
-            if (event.source !== window || !event.data) return;
-            if (event.data.reqId === reqId) {
-                window.removeEventListener("message", listener);
-                script.remove();
-                if (event.data.type === 'reCAPTCHA_result') {
-                    resolve(event.data.token);
-                } else {
-                    reject(new Error(event.data.error || "Unknown reCAPTCHA Error"));
-                }
-            }
-        };
-        window.addEventListener("message", listener);
-        document.documentElement.appendChild(script);
-        
-        setTimeout(() => {
-            window.removeEventListener("message", listener);
-            script.remove();
-            reject(new Error("Timeout generating reCAPTCHA"));
-        }, 15000);
-    });
+function detectEmailFromDOM() {
+    for (const el of document.querySelectorAll('[aria-label]')) {
+        const label = el.getAttribute('aria-label') || '';
+        const match = label.match(/\(([^()\s]+@[^()\s]+\.[^()\s]+)\)/);
+        if (match) return match[1].toLowerCase();
+    }
+    const text = document.body?.innerText || "";
+    const candidates = [...text.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)]
+        .map(match => match[0].toLowerCase());
+    return candidates[0] || null;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "flow2api_detect_email") {
-        const text = document.body?.innerText || "";
-        const candidates = [...text.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)]
-            .map(match => match[0].toLowerCase());
-        sendResponse({ email: candidates[0] || null });
+        sendResponse({ email: detectEmailFromDOM() });
         return false;
     }
-    if (message.type === "get_token") {
-        console.log("[Flow2API] Generating token for action: " + message.action);
-        getRecaptchaToken(message.action)
-            .then(token => sendResponse({status: "success", token: token}))
-            .catch(err => sendResponse({status: "error", error: err.message}));
-        return true; 
-    }
 });
-

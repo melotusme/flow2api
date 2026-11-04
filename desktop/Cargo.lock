@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "flow2api-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "flow2api-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "flow2api-core",

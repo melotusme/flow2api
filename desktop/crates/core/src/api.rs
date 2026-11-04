@@ -29,6 +29,14 @@ pub fn router(app: Arc<App>) -> Router {
             get(gemini_model).post(gemini_generate),
         )
         .route("/media/{filename}", get(media))
+        .route(
+            "/api/browser-login/sync",
+            post(sync_browser_login).options(cors_options),
+        )
+        .route(
+            "/extension/flow2api-flow-login-sync.user.js",
+            get(userscript_content),
+        )
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
         .with_state(app)
 }
@@ -416,6 +424,82 @@ fn byte_range(raw: &str, size: u64) -> Option<(u64, u64)> {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct SyncBrowserLoginPayload {
+    #[serde(default)]
+    login_account: String,
+    #[serde(default)]
+    google_cookies: Value,
+}
+
+async fn cors_options() -> Response {
+    (
+        StatusCode::NO_CONTENT,
+        [
+            ("access-control-allow-origin", "*"),
+            ("access-control-allow-methods", "GET, POST, OPTIONS"),
+            ("access-control-allow-headers", "*"),
+        ],
+    )
+        .into_response()
+}
+
+async fn userscript_content() -> impl IntoResponse {
+    let script = include_str!("../assets/extension/flow2api-flow-login-sync.user.js");
+    (
+        StatusCode::OK,
+        [
+            ("content-type", "text/javascript; charset=utf-8"),
+            (
+                "content-disposition",
+                "inline; filename=\"flow2api-flow-login-sync.user.js\"",
+            ),
+            ("access-control-allow-origin", "*"),
+        ],
+        script,
+    )
+}
+
+async fn sync_browser_login(
+    State(app): State<Arc<App>>,
+    Json(payload): Json<SyncBrowserLoginPayload>,
+) -> Result<Response, ApiError> {
+    let cookies_val: Vec<Value> = match payload.google_cookies {
+        Value::String(s) => serde_json::from_str(&s)
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("Cookie JSON 解析失败: {e}")))?,
+        Value::Array(arr) => arr,
+        _ => Vec::new(),
+    };
+    if cookies_val.is_empty() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "未提供有效的 google_cookies".into(),
+        ));
+    }
+    let email_opt = if payload.login_account.trim().is_empty() {
+        None
+    } else {
+        Some(payload.login_account.trim())
+    };
+    let account = app.sync_cookies(email_opt, &cookies_val).await?;
+    let resp = (
+        StatusCode::OK,
+        [
+            ("access-control-allow-origin", "*"),
+            ("access-control-allow-headers", "*"),
+        ],
+        Json(json!({
+            "success": true,
+            "email": account.email,
+            "credits": account.credits,
+            "added": 1,
+            "updated": 0,
+        })),
+    )
+        .into_response();
+    Ok(resp)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -683,6 +767,43 @@ mod tests {
         assert!(text.contains("upstream rejected"));
         assert!(!text.contains("[DONE]"));
         assert!(!text.contains("\"finish_reason\":\"stop\""));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn browser_login_sync_routes_and_cors_work() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let app = App::open(directory.path())?;
+
+        // 1. OPTIONS CORS preflight
+        let options_req = axum::http::Request::builder()
+            .method("OPTIONS")
+            .uri("/api/browser-login/sync")
+            .body(Body::empty())?;
+        let resp: Response = router(app.clone()).oneshot(options_req).await?;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert_eq!(resp.headers().get("access-control-allow-origin").unwrap(), "*");
+
+        // 2. Userscript served
+        let userscript_req = axum::http::Request::builder()
+            .method("GET")
+            .uri("/extension/flow2api-flow-login-sync.user.js")
+            .body(Body::empty())?;
+        let resp: Response = router(app.clone()).oneshot(userscript_req).await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 100_000).await?;
+        let text = String::from_utf8(body.to_vec())?;
+        assert!(text.contains("Flow2API 登录态同步"));
+
+        // 3. Empty cookies rejected
+        let post_req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/browser-login/sync")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"login_account":"","google_cookies":[]}"#))?;
+        let resp: Response = router(app.clone()).oneshot(post_req).await?;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
         Ok(())
     }
 }

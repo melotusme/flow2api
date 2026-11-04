@@ -155,24 +155,63 @@ async fn open_login(
     id: String,
 ) -> Result<(), String> {
     result(&state.core, state.core.open_login(&id).await)?;
-    let core = state.core.clone();
+    watch_login(app, state.core.clone(), id, false);
+    Ok(())
+}
+/// One click: open a fresh Chrome on Google sign-in; the email is detected automatically.
+#[tauri::command]
+async fn quick_login(app: tauri::AppHandle, state: tauri::State<'_, Desktop>) -> Result<(), String> {
+    let id = result(&state.core, state.core.start_quick_login().await)?;
+    watch_login(app, state.core.clone(), id, true);
+    Ok(())
+}
+/// Poll the login window for up to 10 minutes. `pending` means the account is not saved
+/// yet: first detect the email and create it, then keep syncing until credits are readable.
+fn watch_login(app: tauri::AppHandle, core: Arc<App>, id: String, mut pending: bool) {
     tauri::async_runtime::spawn(async move {
-        for _ in 0..60 {
+        for _ in 0..200 {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             if core.browsers.existing_session(&id).await.is_none() {
                 break;
             }
-            if let Ok(Some(account)) = core.try_auto_sync(&id).await {
+            let synced = if pending {
+                match core.try_finish_quick_login(&id).await {
+                    Ok(Some(account)) => {
+                        pending = false;
+                        let _ = app.emit("account-synced", &account);
+                        if account.last_synced.is_none() {
+                            let _ = app.emit(
+                                "notice",
+                                format!("已识别 {}，正在等待 Flow 页面就绪后同步…", account.email),
+                            );
+                            continue;
+                        }
+                        Some(account)
+                    }
+                    Ok(None) => None,
+                    Err(error) => {
+                        let _ = app.emit("notice", error.to_string());
+                        core.browsers.discard(&id).await;
+                        return;
+                    }
+                }
+            } else {
+                core.try_auto_sync(&id).await.ok().flatten()
+            };
+            if let Some(account) = synced {
                 let _ = app.emit("account-synced", &account);
                 let _ = app.emit(
                     "notice",
-                    format!("已自动检测到 {} 登录成功并完成同步。", account.email),
+                    format!("{} 登录成功，已自动同步。", account.email),
                 );
-                break;
+                return;
             }
         }
+        // The window was closed (or timed out) before an email was detected: nothing to keep.
+        if pending {
+            core.browsers.discard(&id).await;
+        }
     });
-    Ok(())
 }
 #[tauri::command]
 async fn sync_account(state: tauri::State<'_, Desktop>, id: String) -> Result<Account, String> {
@@ -313,6 +352,56 @@ fn open_chrome_download(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_url("https://www.google.com/chrome/", None::<&str>)
         .map_err(|e| e.to_string())
+}
+fn ensure_extension_files(root: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let dir = root.join("extension");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let _ = std::fs::write(dir.join("manifest.json"), include_str!("../../crates/core/assets/extension/manifest.json"));
+    let _ = std::fs::write(dir.join("popup.html"), include_str!("../../crates/core/assets/extension/popup.html"));
+    let _ = std::fs::write(dir.join("popup.js"), include_str!("../../crates/core/assets/extension/popup.js"));
+    let _ = std::fs::write(dir.join("content.js"), include_str!("../../crates/core/assets/extension/content.js"));
+    let _ = std::fs::write(dir.join("background.js"), include_str!("../../crates/core/assets/extension/background.js"));
+    let _ = std::fs::write(dir.join("options.html"), include_str!("../../crates/core/assets/extension/options.html"));
+    let _ = std::fs::write(dir.join("options.js"), include_str!("../../crates/core/assets/extension/options.js"));
+    let _ = std::fs::write(dir.join("flow2api-flow-login-sync.user.js"), include_str!("../../crates/core/assets/extension/flow2api-flow-login-sync.user.js"));
+    Ok(dir)
+}
+#[tauri::command]
+async fn install_chrome_extension(
+    _app: tauri::AppHandle,
+    state: tauri::State<'_, Desktop>,
+) -> Result<String, String> {
+    let root = state.core.store.root.clone();
+    let ext_dir = ensure_extension_files(&root)?;
+    let settings = result(&state.core, state.core.store.settings())?;
+    let executable = flow2api_core::browser::executable(&settings.browser_executable)
+        .map_err(|e| e.to_string())?;
+
+    let mut command = std::process::Command::new(executable);
+    command.arg(format!("--load-extension={}", ext_dir.display()));
+    command.arg("https://flow.google.com/");
+    command.spawn().map_err(|e| format!("启动 Chrome 失败: {e}"))?;
+
+    Ok(ext_dir.to_string_lossy().into_owned())
+}
+#[tauri::command]
+fn open_extension_folder(
+    app: tauri::AppHandle,
+    state: tauri::State<Desktop>,
+) -> Result<String, String> {
+    let root = state.core.store.root.clone();
+    let ext_dir = ensure_extension_files(&root)?;
+    let _ = app.opener().open_path(ext_dir.to_string_lossy(), None::<&str>);
+    Ok(ext_dir.to_string_lossy().into_owned())
+}
+#[tauri::command]
+fn open_userscript_url(
+    app: tauri::AppHandle,
+    state: tauri::State<Desktop>,
+) -> Result<(), String> {
+    let port = state.core.store.settings().map(|s| s.port).unwrap_or(8000);
+    let url = format!("http://127.0.0.1:{port}/extension/flow2api-flow-login-sync.user.js");
+    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn open_data(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
@@ -692,6 +781,7 @@ pub fn run() {
             browser_profiles,
             choose_browser,
             open_login,
+            quick_login,
             sync_account,
             tasks,
             submit,
@@ -704,6 +794,9 @@ pub fn run() {
             legacy_history,
             open_data,
             open_chrome_download,
+            install_chrome_extension,
+            open_extension_folder,
+            open_userscript_url,
             open_media,
             quit,
             autostart_enabled,

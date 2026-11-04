@@ -1,16 +1,10 @@
 // ==UserScript==
 // @name         Flow2API 登录态同步
 // @namespace    flow2api
-// @version      1.0.5
-// @description  在 Flow 页面把当前 Google Cookie 同步到 Flow2API
+// @version      1.1.0
+// @description  在 Flow 页面把当前 Google Cookie 同步到 Flow2API 桌面版
 // @match        https://flow.google.com/*
 // @match        https://labs.google/*
-// @match        http://localhost/*
-// @match        http://127.0.0.1/*
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_deleteValue
-// @grant        GM_openInTab
 // @grant        GM_cookie
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
@@ -19,61 +13,106 @@
 
 (function () {
   "use strict";
-  if (["localhost", "127.0.0.1"].includes(location.hostname)) {
-    const nonce = new URLSearchParams(location.hash.slice(1)).get("flow2api-sync");
-    if (!nonce) return;
-    const key = "flow2api-sync-" + nonce;
-    const pending = GM_getValue(key);
-    GM_deleteValue(key);
-    if (!pending || pending.server !== location.origin || Date.now() - pending.created > 120000) return;
-    const result = document.createElement("div");
-    result.style.cssText = "position:fixed;top:16px;right:16px;z-index:2147483647;background:#fff;color:#111;padding:18px;border:1px solid #ccc;white-space:pre-wrap;max-width:500px";
-    document.body.append(result);
-    result.textContent = "正在导入 Flow 登录态…";
-    fetch("/api/browser-login/sync", {method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(pending.payload)})
-      .then(async r => { const data=await r.json(); if(!r.ok || !data.success) throw new Error(r.status===401 ? "请先登录管理后台后重新同步" : (data.errors || [data.detail || data.message]).join("\n")); return data; })
-      .then(data => {result.textContent = "Flow2API 同步成功：新增 " + data.added + "，更新 " + data.updated;})
-      .catch(error => {result.textContent = "Flow2API 同步失败：" + error.message;});
-    return;
-  }
   if (location.hostname !== "flow.google.com" && location.hostname !== "labs.google") return;
-  const DEFAULT_EMAIL = "account1@example.com";
+
+  function detectEmail() {
+    for (const el of document.querySelectorAll('[aria-label]')) {
+      const label = el.getAttribute('aria-label') || '';
+      const match = label.match(/\(([^()\s]+@[^()\s]+\.[^()\s]+)\)/);
+      if (match) return match[1].toLowerCase();
+    }
+    const text = document.body?.innerText || "";
+    const candidates = [...text.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)]
+      .map(match => match[0].toLowerCase());
+    return candidates[0] || "";
+  }
+
   const panel = document.createElement("div");
-  panel.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:2147483647;background:#fff;color:#111;padding:14px;border:1px solid #ccc;border-radius:12px;font:14px sans-serif;max-width:390px;box-shadow:0 2px 12px #0003";
+  panel.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:2147483647;background:#152226;color:#e7eeec;padding:14px;border:1px solid #30474b;border-radius:10px;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:320px;box-shadow:0 8px 24px #0008";
+
+  const title = document.createElement("div");
+  title.style.cssText = "font-weight:600;margin-bottom:8px;color:#85dfbf";
+  title.textContent = "Flow2API 同步助手";
+
   const address = document.createElement("input");
-  address.value = localStorage.getItem("flow2api_server") || "http://localhost:8000";
-  address.style.cssText = "width:240px;padding:6px";
+  address.value = localStorage.getItem("flow2api_server") || "http://127.0.0.1:8000";
+  address.style.cssText = "width:100%;box-sizing:border-box;background:#0d1518;color:#e7eeec;border:1px solid #314448;border-radius:6px;padding:6px 8px;font-size:12px;margin-bottom:8px";
+
   const button = document.createElement("button");
-  button.textContent = "同步到 Flow2API";
-  button.style.cssText = "padding:8px;margin:8px 0;cursor:pointer";
+  button.textContent = "同步当前登录到 Flow2API";
+  button.style.cssText = "width:100%;padding:8px 12px;background:#85dfbf;color:#12352b;border:0;border-radius:6px;font-weight:600;cursor:pointer";
+
   const status = document.createElement("div");
-  status.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere";
-  status.textContent = DEFAULT_EMAIL;
-  panel.append(address, document.createElement("br"), button, status);
+  status.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.5;color:#92a9ab;margin-top:8px";
+  status.textContent = "已登录后点击上方按钮即可同步到桌面版。";
+
+  panel.append(title, address, button, status);
   document.body.append(panel);
+
   button.addEventListener("click", async () => {
     const server = address.value.trim().replace(/\/+$/, "");
-    if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(server)) { status.textContent = "请填写本机 Flow2API 地址"; return; }
+    if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(server)) {
+      status.textContent = "请填写本机 Flow2API 地址（如 http://127.0.0.1:8000）";
+      return;
+    }
     localStorage.setItem("flow2api_server", server);
-    const email = DEFAULT_EMAIL;
+
+    const email = detectEmail();
     button.disabled = true;
-    status.textContent = "同步中…";
+    status.textContent = "正在读取当前 Cookie…";
 
-  function listCookies(url) {
-    return new Promise((resolve, reject) => {
-      if (typeof GM_cookie === "undefined") return reject(new Error("Tampermonkey 未提供 GM_cookie"));
-      GM_cookie.list({ url }, (cookies, error) => error ? reject(new Error(String(error))) : resolve(cookies || []));
-    });
-  }
+    function listCookies(url) {
+      return new Promise((resolve, reject) => {
+        if (typeof GM_cookie === "undefined") {
+          return reject(new Error("当前脚本管理器未开启 GM_cookie 权限，请改用 Flow2API Chrome 扩展。"));
+        }
+        GM_cookie.list({ url }, (cookies, error) => {
+          if (error) reject(new Error(String(error)));
+          else resolve(cookies || []);
+        });
+      });
+    }
 
-  listCookies(location.origin + "/").then(cookies => {
-    if (!cookies.some(c => c.name === "OSID" || c.name === "__Secure-OSID")) throw new Error("Tampermonkey 无法读取 Flow 必需的 HttpOnly OSID。请使用 Flow2API Chrome 扩展同步；GM_cookie 授权无法补齐此 Cookie。");
-    const nonce = crypto.randomUUID();
-    const key = "flow2api-sync-" + nonce;
-    GM_setValue(key, {server, created:Date.now(), payload:{login_account:email,google_cookies:JSON.stringify(cookies),protocol_mode:"protocol"}});
-    setTimeout(() => GM_deleteValue(key), 120000);
-    GM_openInTab(server + "/manage#flow2api-sync=" + nonce, {active:true});
-    status.textContent = "已打开管理后台，请查看后台同步结果";
-  }).catch(error => {status.textContent = "Flow2API 同步失败：" + error.message;}).finally(() => {button.disabled=false;});
+    try {
+      const cookies = await listCookies(location.origin + "/");
+      if (!cookies.length) {
+        throw new Error("未能获取到 Cookie，请先在当前页面确认已登录 Flow。");
+      }
+
+      status.textContent = "正在发送登录态到 Flow2API…";
+
+      GM_xmlhttpRequest({
+        method: "POST",
+        url: server + "/api/browser-login/sync",
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({
+          login_account: email,
+          google_cookies: JSON.stringify(cookies),
+          protocol_mode: "protocol"
+        }),
+        onload: function (res) {
+          button.disabled = false;
+          try {
+            const data = JSON.parse(res.responseText);
+            if (data.success) {
+              const acc = data.email || email || "Google 账号";
+              const cred = (data.credits !== undefined && data.credits !== null) ? ` · 余额: ${data.credits}` : "";
+              status.textContent = `✓ 同步成功！已连接 ${acc}${cred}\n请返回桌面端查看。`;
+            } else {
+              status.textContent = "同步失败：" + (data.detail || data.error?.message || res.responseText);
+            }
+          } catch (e) {
+            status.textContent = "响应解析错误: " + res.responseText;
+          }
+        },
+        onerror: function (err) {
+          button.disabled = false;
+          status.textContent = "连接失败，请确认 Flow2API 桌面版已启动且端口一致。";
+        }
+      });
+    } catch (err) {
+      button.disabled = false;
+      status.textContent = err.message || "同步异常";
+    }
   });
 })();
