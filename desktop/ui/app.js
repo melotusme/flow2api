@@ -6,7 +6,6 @@ const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords
 const labels = {queued:'排队中',running:'生成中',succeeded:'已保存',failed:'失败',interrupted:'已中断',archived:'旧版已完成'};
 const titles = {studio:'创作工作台',tasks:'任务与进度',library:'本机作品',accounts:'Google 账号',settings:'设置与接入'};
 let noticeTimer;
-let legacyPath;
 
 function notice(message,error=false){
   $('notice').textContent=String(message);
@@ -244,8 +243,6 @@ function updateStatus(status){
   if(status.address)$('base-url').textContent=status.address+'/v1';
   $('generate').disabled=!running;
   if(status.last_error&&status.service==='failed')notice(status.last_error,true);
-  $('import-legacy').disabled=!legacyPath||status.running+status.queued>0||['starting','stopping'].includes(status.service);
-  $('import-legacy').textContent='备份并导入';
 }
 
 function selectedModel(){return state.models.find(model=>model.id===$('model').value)}
@@ -553,44 +550,6 @@ function renderMedia(){
   mediaView.update(state.media);
 }
 
-const legacyView=createListView({
-  key:'legacy',
-  hostId:'legacy-history',
-  searchPlaceholder:'搜索项目名、项目 ID、请求类型、状态码或账号…',
-  sorts:[
-    {value:'primary',label:'时间／标识',get:item=>{
-      const r=item.record||{};
-      return r.created_at||r.last_success_at||r.project_name||String(r.token_id||r.id||'');
-    }},
-    {value:'secondary',label:'状态／数量',get:item=>{
-      const r=item.record||{};
-      return Number(r.status_code??r.success_count??r.token_id??0);
-    }},
-  ],
-  emptyText:'暂无这类旧版记录。',
-  noMatchText:'没有匹配当前筛选条件的旧版记录。',
-  revisionKey:items=>[$('legacy-table').value,items],
-  renderItem:item=>{
-    const table=$('legacy-table').value;
-    const record=item.record||{};
-    const card=node('article',undefined,'migration-report');
-    if(table==='projects'){
-      card.append(node('strong',record.project_name||'旧版项目'),node('p',record.project_id||''),node('small',record.created_at||''));
-    }else if(table==='request_logs'){
-      card.append(node('strong',`${record.operation||'请求'} · HTTP ${record.status_code??'—'}`),node('p',record.status_text||''),node('small',`${record.created_at||''} · ${record.duration??'—'} 秒`));
-    }else{
-      card.append(node('strong',`旧版账号 ${record.token_id}`),node('p',`图片 ${record.image_count??0} · 视频 ${record.video_count??0} · 成功 ${record.success_count??0} · 失败 ${record.error_count??0}`));
-    }
-    return card;
-  },
-});
-
-async function loadLegacyHistory(){
-  const table=$('legacy-table').value;
-  state.legacyRecords=await invoke('legacy_history',{table});
-  legacyView.update(state.legacyRecords,true);
-}
-
 async function reloadSettings(){
   state.settings=await invoke('settings');
   for(const [key,value]of Object.entries(state.settings)){
@@ -599,59 +558,6 @@ async function reloadSettings(){
   }
   $('base-url').textContent=`http://127.0.0.1:${state.settings.port}/v1`;
 }
-
-async function refreshMigrationReports(){
-  const reports=await invoke('migration_reports');
-  const list=$('migration-reports');
-  list.replaceChildren();
-  for(const report of reports){
-    const card=node('article',undefined,'migration-report');
-    card.append(
-      node('strong',new Date(report.created_at).toLocaleString()),
-      node('p',`账号新增 ${report.accounts_added}，已有 ${report.accounts_existing}；历史任务 ${report.tasks_added}；作品 ${report.media_added}；历史记录 ${report.records_added}`),
-      node('p','备份位置：'+report.backup_dir,'hint')
-    );
-    for(const note of report.notes)card.append(node('p',note,'hint'));
-    card.append(button('撤销这次导入',async()=>{
-      if(!confirm('撤销会恢复导入前的桌面数据。导入后若已有新数据，将拒绝撤销；复制的作品文件保留用于恢复。是否继续？'))return;
-      await invoke('rollback_legacy',{id:report.id});
-      await reloadSettings();
-      await refresh();
-      await refreshMigrationReports();
-      await loadLegacyHistory();
-      notice('已恢复导入前的桌面数据，备份与作品文件仍保留。');
-    }));
-    list.append(card);
-  }
-}
-
-$('choose-legacy').onclick=()=>action($('choose-legacy'),async()=>{
-  const path=await invoke('choose_legacy_directory');
-  if(!path)return;
-  legacyPath=null;
-  $('import-legacy').disabled=true;
-  const preview=await invoke('preview_legacy',{path});
-  legacyPath=path;
-  $('legacy-path').textContent=preview.source;
-  $('legacy-preview').replaceChildren(node('p',`账号 ${preview.accounts} · 项目 ${preview.projects} · 任务 ${preview.tasks} · 请求日志 ${preview.logs} · 永久作品 ${preview.media}`));
-  for(const note of preview.notes)$('legacy-preview').append(node('p',note,'hint'));
-  $('legacy-settings').checked=false;
-  $('legacy-settings').disabled=!preview.settings_available;
-  updateStatus(state.status);
-});
-
-$('import-legacy').onclick=()=>action($('import-legacy'),async()=>{
-  if(!legacyPath)throw Error('请先选择旧版目录');
-  await invoke('import_legacy',{path:legacyPath,importSettings:$('legacy-settings').checked});
-  await reloadSettings();
-  await refresh();
-  await refreshMigrationReports();
-  await loadLegacyHistory();
-  notice('导入完成。请打开专用 Chrome 完成账号登录同步后开始创作。');
-});
-
-$('load-legacy-history').onclick=()=>action($('load-legacy-history'),loadLegacyHistory);
-$('legacy-table').onchange=()=>loadLegacyHistory().catch(error=>notice(error,true));
 
 async function refresh(){
   const [accounts,tasks,media,status]=await Promise.all([
@@ -864,8 +770,6 @@ $('install-update').onclick=()=>action($('install-update'),async()=>{
     $('platform').textContent=navigator.userAgent.includes('Mac')?'macOS · 菜单栏运行':'Windows · 托盘运行';
     await loadDevice();
     await refresh();
-    await refreshMigrationReports();
-    await loadLegacyHistory();
     let polling=false;
     setInterval(async()=>{
       if(polling)return;
