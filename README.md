@@ -212,6 +212,24 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 - 图生图 / 图生视频场景支持上传图片
 - 生成完成后直接预览图片或视频
 
+## 🌐 界面语言 / Interface language
+
+登录页、管理后台和模型测试页均支持 **简体中文 / English**。使用页面右上角的语言选择器切换；首次访问会匹配浏览器语言，手动选择后保存在当前浏览器，跨页面及重新访问时继续生效。切换语言不会刷新页面，也不会清空表单、上传图片或中断生成任务。
+
+The sign-in page, admin console, and model tester support **Simplified Chinese and English**. Use the language selector in the top-right corner. The initial language follows your browser, and your selection is saved locally. Switching languages preserves form inputs, uploaded images, and active generation tasks.
+
+浏览器验证码扩展的设置页也提供中英文切换，偏好保存在扩展本地存储中，切换时保留未保存的配置。The captcha extension's settings page also supports both languages and stores its preference separately, preserving unsaved settings when switching.
+
+管理接口的提示和错误支持 `Accept-Language: zh-CN` / `Accept-Language: en`，并返回 `Content-Language`。未支持的语言回退至简体中文。账号信息、提示词、生成内容、日志原文和未知的上游错误保持原样；生成结果及 SSE 流不会经过翻译。
+
+API messages and errors honor `Accept-Language: zh-CN` or `Accept-Language: en` and return `Content-Language`. Unsupported languages fall back to Simplified Chinese. Account data, prompts, generated content, raw logs, and unknown upstream diagnostics remain unchanged. Generation results and SSE streams are passed through unchanged.
+
+翻译词典位于 `static/locales/`：`common.json` 为共享文案，`login.json` / `manage.json` / `test.json` 对应三个页面，`backend.json` 对应 API 提示。每个词典包含 `zh-CN` 和 `en`，使用原文作为消息键；新增译文时需保留 `{0}` 等占位符。
+
+Translation catalogs live in `static/locales/`. Each catalog contains `zh-CN` and `en` entries keyed by the source message. Keep interpolation placeholders such as `{0}` unchanged when editing translations.
+
+扩展的词典位于 `extension/locales.json`。The extension catalog is `extension/locales.json`.
+
 ## 📋 支持的模型
 
 ### 图片生成

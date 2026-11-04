@@ -15,6 +15,22 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from ..core.logger import debug_logger
 from .browser_cookie_utils import validate_flow_cookie_storage
 
+def _safe_updated_flow_cookies(owner, original) -> str:
+    """读取 Cookie 最新快照，缺失实现时安全降级。
+
+    旧版/自定义 flow_frontend 覆盖可能没有 get_updated_flow_cookies，
+    直接调用会抛 AttributeError（历史报错：
+    'FlowClient' object has no attribute 'get_updated_flow_cookies'）。
+    """
+    getter = getattr(owner, "get_updated_flow_cookies", None)
+    if getter is None:
+        return str(original or "").strip()
+    try:
+        return getter(original)
+    except Exception:
+        return str(original or "").strip()
+
+
 class CurrentFlowClientMixin:
     FRONTEND_ACCESS_TOKEN = "flow-frontend-cookie"
     CURRENT_IMAGE_MODELS = frozenset({"BELUGA", "HARBOR_SEAL", "GEM_PIX_2"})
@@ -133,6 +149,9 @@ class CurrentFlowClientMixin:
     ) -> dict:
         if str(google_cookies or "").strip():
             validate_flow_cookie_storage(google_cookies)
+        google_cookies = await self._resolve_flow_frontend_cookie_storage(
+            google_cookies=google_cookies, token_id=token_id
+        )
         credits = await self.get_credits(
             self.FRONTEND_ACCESS_TOKEN,
             google_cookies=google_cookies,
@@ -145,6 +164,7 @@ class CurrentFlowClientMixin:
             "user": {},
             "credits": credits.get("credits", 0),
             "userPaygateTier": credits.get("userPaygateTier"),
+            "google_cookies": _safe_updated_flow_cookies(self, google_cookies),
         }
 
     async def create_project(

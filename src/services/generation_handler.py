@@ -2032,6 +2032,7 @@ class GenerationHandler:
             "打码服务资源不足",
             "打码服务资源阻塞",
             "yescaptcha",
+            "flow2api_team",
             "capsolver",
             "captcharun",
             "twocaptcha",

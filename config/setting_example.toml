@@ -53,7 +53,7 @@ timeout = 7200  # 缓存超时时间(秒), 默认2小时; 设置为0表示不自
 base_url = ""   # 缓存文件访问的基础URL, 留空则使用服务器地址
 
 [captcha]
-captcha_method = "yescaptcha"  # 打码方式: yescaptcha/captcharun/twocaptcha/capsolver/ezcaptcha/browser/personal/ego_browser/remote_browser
+captcha_method = "yescaptcha"  # 打码方式: yescaptcha/flow2api_team/captcharun/twocaptcha/capsolver/ezcaptcha/browser/personal/ego_browser/remote_browser
 # ego_browser 复用已经登录的 ego lite 工作区，三个字段均须按本机情况填写
 # ego_browser_space_id = 10
 # ego_browser_page_label = "p1"
