@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.3.1';
+const APP_VERSION='0.3.2';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -891,10 +891,11 @@ for(const [id,name] of [['webdav-test','test'],['webdav-push','push'],['webdav-p
 
 function renderUpdateStatus(status){
   if(!status?.message)return;
+  const source=status.auth_source?` 认证来源：${status.auth_source}。`:'';
   const checked=status.checked_at?` 上次检查：${new Date(status.checked_at*1000).toLocaleString()}。`:'';
-  $('update-status').textContent=status.message+checked;
+  $('update-status').textContent=status.message+source+checked;
   const dialogStatus=document.getElementById('dialog-update-status');
-  if(dialogStatus)dialogStatus.textContent=status.message+checked;
+  if(dialogStatus)dialogStatus.textContent=status.message+source+checked;
   if($('update-badge'))$('update-badge').textContent=({error:'更新失败',checking:'检查中',current:'已是最新',available:'有新版本',waiting:'等待空闲',downloading:'下载中',installing:'安装中'})[status.phase]||'检查更新';
 }
 
@@ -917,7 +918,7 @@ function showUpdateDialog(autoCheck=false){
 
     const body=node('div');
     body.style.margin='20px 0';
-    const statusText=node('p','点击“立即检查”将通过本机已登录的 GitHub CLI 检查私有仓库最新版本。','hint');
+    const statusText=node('p','点击“立即检查”将复用本机 GitHub Desktop 或 GitHub CLI 登录，检查私有仓库最新版本。','hint');
     statusText.id='dialog-update-status';
     const releaseNotes=node('pre',undefined,'update-notes');
     releaseNotes.id='dialog-update-notes';
@@ -966,13 +967,15 @@ async function runUpdateCheck(triggerBtn){
       $('install-update').hidden=true;
       const dialogInstall=document.getElementById('dialog-install-btn');
       if(dialogInstall)dialogInstall.style.display='none';
-      const msg=`当前已是最新版本（v${APP_VERSION}）。`;
+      const auth=await invoke('private_update_status');
+      const msg=`当前已是最新版本（v${APP_VERSION}）。${auth.auth_source?` 认证来源：${auth.auth_source}。`:''}`;
       setStatus(msg);
       if($('update-badge'))$('update-badge').textContent='已是最新';
       notice(msg);
       return;
     }
-    const msg=`发现新版本 v${found.version}（当前 v${found.current_version||APP_VERSION}）。`;
+    const auth=await invoke('private_update_status');
+    const msg=`发现新版本 v${found.version}（当前 v${found.current_version||APP_VERSION}）。${auth.auth_source?` 认证来源：${auth.auth_source}。`:''}`;
     setStatus(msg,found.body||'');
     $('install-update').hidden=false;
     const dialogInstall=document.getElementById('dialog-install-btn');

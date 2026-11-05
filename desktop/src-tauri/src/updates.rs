@@ -23,6 +23,7 @@ pub struct UpdateStatus {
     phase: String,
     message: String,
     checked_at: Option<u64>,
+    auth_source: Option<&'static str>,
 }
 
 fn report(app: &tauri::AppHandle, phase: &str, message: impl Into<String>) {
@@ -53,7 +54,7 @@ pub struct Available {
     body: Option<String>,
 }
 
-fn hidden(program: &str) -> std::process::Command {
+pub(crate) fn hidden(program: &str) -> std::process::Command {
     #[allow(unused_mut)]
     let mut command = std::process::Command::new(program);
     #[cfg(target_os = "windows")]
@@ -62,52 +63,6 @@ fn hidden(program: &str) -> std::process::Command {
         command.creation_flags(0x08000000);
     }
     command
-}
-
-fn gh_program() -> Result<String, String> {
-    #[cfg(target_os = "windows")]
-    {
-        let program_files = std::env::var_os("ProgramFiles")
-            .map(std::path::PathBuf::from)
-            .map(|path| path.join("GitHub CLI/gh.exe"))
-            .filter(|path| path.is_file());
-        return Ok(program_files
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "gh.exe".into()));
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
-            .into_iter()
-            .find(|path| std::path::Path::new(path).is_file())
-            .map(str::to_string)
-            .ok_or_else(|| "私有更新需要 GitHub CLI：请安装 gh 并执行 gh auth login。".into())
-    }
-}
-
-async fn token() -> Result<String, String> {
-    let program = gh_program()?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let output = hidden(&program)
-            .args(["auth", "token", "--hostname", "github.com"])
-            .output()
-            .map_err(|_| "无法读取本机 GitHub 登录，请执行 gh auth login。")?;
-        if !output.status.success() {
-            return Err(
-                "GitHub 尚未登录，请执行 gh auth login，并确认账号可读取更新仓库。".to_string(),
-            );
-        }
-        let token = String::from_utf8(output.stdout)
-            .map_err(|_| "GitHub 凭据格式异常。")?
-            .trim()
-            .to_owned();
-        if token.is_empty() {
-            return Err("GitHub 登录凭据为空，请重新登录。".into());
-        }
-        Ok(token)
-    })
-    .await
-    .map_err(|_| "读取 GitHub 登录状态失败。".to_string())?
 }
 
 fn http() -> Result<reqwest::Client, String> {
@@ -188,7 +143,9 @@ async fn get(
     }
     match response.status().as_u16() {
         200..=299 => Ok(response),
-        401 => Err("GitHub 登录已失效，请执行 gh auth login。".into()),
+        401 => {
+            Err("GitHub 登录已失效，请在 GitHub Desktop 重新登录，或执行 gh auth login。".into())
+        }
         403 | 404 => {
             Err("无法读取私有更新：请确认 GitHub 账号拥有仓库权限，且已有正式 Release。".into())
         }
@@ -224,28 +181,25 @@ pub async fn check_private_update(
     app: tauri::AppHandle,
     state: tauri::State<'_, State>,
 ) -> Result<Option<Available>, String> {
-    let result = check(&app, &state).await;
+    let result = check(&app, &state, true).await;
     if let Err(error) = &result {
         report(&app, "error", error);
     }
     result
 }
 
-async fn check(app: &tauri::AppHandle, state: &State) -> Result<Option<Available>, String> {
+async fn check(
+    app: &tauri::AppHandle,
+    state: &State,
+    interactive: bool,
+) -> Result<Option<Available>, String> {
     let mut pending = state.pending.lock().await;
+    state.status.lock().unwrap().auth_source = None;
     report(app, "checking", "正在检查私有更新…");
-    let token = token().await?;
     let client = http()?;
-    let release: Value = get(
-        &client,
-        &token,
-        &format!("{API}{REPO}/releases/latest"),
-        false,
-    )
-    .await?
-    .json()
-    .await
-    .map_err(|_| "GitHub Release 元数据格式异常。")?;
+    let (credential, release) = super::update_auth::release(&client, interactive).await?;
+    state.status.lock().unwrap().auth_source = Some(credential.source.label());
+    let token = credential.token;
     let mut manifest: Value = get(&client, &token, &asset(&release, "latest.json")?, true)
         .await?
         .json()
@@ -311,8 +265,10 @@ async fn install(app: &tauri::AppHandle, state: &State, automatic: bool) -> Resu
         return Err("仍有执行或排队任务，更新将在任务完成后重试。".into());
     }
     report(app, "downloading", format!("正在下载 v{}…", update.version));
-    let token = token().await?;
     let client = http()?;
+    let (credential, _) = super::update_auth::release(&client, !automatic).await?;
+    state.status.lock().unwrap().auth_source = Some(credential.source.label());
+    let token = credential.token;
     let mut response = get(&client, &token, update.download_url.as_str(), true).await?;
     let total = response.content_length();
     if total.is_some_and(|size| size > LIMIT as u64) {
@@ -385,7 +341,7 @@ pub fn start(app: tauri::AppHandle) {
             {
                 let state = app.state::<State>();
                 if tokio::time::Instant::now() >= next_check {
-                    let result = check(&app, &state).await;
+                    let result = check(&app, &state, false).await;
                     next_check = tokio::time::Instant::now()
                         + Duration::from_secs(if result.is_ok() { 6 * 3600 } else { 1800 });
                     if let Err(error) = result {

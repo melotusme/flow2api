@@ -1,3 +1,4 @@
+mod update_auth;
 mod updates;
 
 use flow2api_core::{catalog, model::*, App};

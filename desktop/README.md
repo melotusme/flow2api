@@ -98,7 +98,7 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 默认开启本机自动更新：启动 30 秒后检查，之后每 6 小时检查一次；失败 30 分钟后重试。原生后台调度在关闭窗口后继续运行。检查时间、下载状态和错误显示在「设置与接入 → 软件版本与更新」。可以在运行设置中关闭自动更新。
 
-私有更新依赖每台电脑自己的 GitHub CLI 登录和发行仓库读取权限。凭据仅由原生后端读取，不进入网页、配置文件、包或日志。资产地址限定到固定仓库的数字 asset ID；跨域 CDN 下载不带凭据。安装前校验包签名及版本，等待执行/排队任务全部结束，再停止 API、安装并重启；安装失败恢复 API。账号资料和数据库留在原目录。
+0.3.2 起，私有更新支持每台电脑自己的 GitHub Desktop（macOS / Windows）或 GitHub CLI 登录和发行仓库读取权限。CLI 缺失、未登录、失效或无权限时，自动尝试 Desktop 的 GitHub.com 登录；设置页显示实际认证来源。macOS 首次读取可能需要解锁钥匙串，并手动检查更新以允许 Flow2API 读取。后台检查不会主动弹出授权窗口。Linux 暂使用 CLI。凭据仅由原生后端读取，不进入网页、配置文件、包或日志。资产地址限定到固定仓库的数字 asset ID；跨域 CDN 下载不带凭据。安装前校验包签名及版本，等待执行/排队任务全部结束，再停止 API、安装并重启；安装失败恢复 API。账号资料和数据库留在原目录。
 
 旧版本需要本次从正式 Release 引导安装一次；以后由 App 检查和更新。Linux x64 提供 AppImage，放在可写的用户应用目录（如 `~/.local/opt/flow2api/`），保留可执行权限；运行环境需 WebKitGTK 4.1、GTK3、libayatana-appindicator、FUSE 2（或 `APPIMAGE_EXTRACT_AND_RUN=1`）及已登录的桌面 Secret Service。默认浏览器连接也适用于 Linux Chrome/Chromium。
 
@@ -123,7 +123,7 @@ Windows x64，在已有正式 Release 之后。先安装 GitHub CLI 并 `gh auth
 
 ```powershell
 $repo = 'melotusme/flow2api-releases'
-$tag = 'v0.3.1'
+$tag = 'v0.3.2'
 $asset = 'Flow2API.windows.x64.exe'
 $dir = Join-Path $env:TEMP ('desktop-setup-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $dir | Out-Null
