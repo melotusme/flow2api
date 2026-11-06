@@ -1,3 +1,4 @@
+mod local_env;
 mod update_auth;
 mod updates;
 
@@ -33,6 +34,10 @@ fn result<T>(core: &App, value: anyhow::Result<T>) -> Result<T, String> {
 #[tauri::command]
 fn status(state: tauri::State<Desktop>) -> Status {
     state.core.status()
+}
+#[tauri::command]
+fn preferred_emails(app: tauri::AppHandle) -> Vec<String> {
+    local_env::preferred_emails(app.path().app_data_dir().ok().as_deref())
 }
 #[tauri::command]
 fn settings(state: tauri::State<Desktop>) -> Result<Settings, String> {
@@ -797,6 +802,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             status,
+            preferred_emails,
             settings,
             save_settings,
             magpie_status,

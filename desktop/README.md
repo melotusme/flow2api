@@ -70,6 +70,24 @@ rtk proxy curl -fsS http://127.0.0.1:8000/metrics
 rtk proxy cargo test --manifest-path desktop/Cargo.toml -p flow2api-core browser_transport_detects_closed_page_and_releases_profile -- --ignored --nocapture
 ```
 
+## 本机私有设置
+
+个人邮箱等只放在本机，不进 git、不打进安装包。
+
+| 变量 | 用途 |
+| --- | --- |
+| `FLOW2API_PREFERRED_EMAILS` | 「常用账号」快捷按钮，逗号分隔。未设置时不显示这一栏。 |
+| `FLOW2API_VERIFY_EMAIL` | `scripts/verify_account_runtime.py` 要检查的账号。 |
+
+桌面应用先读环境变量，读不到再读应用数据目录下的 `local.env`（`KEY=value` 格式，可写 `#` 注释）。从 Finder / 开始菜单启动时拿不到 shell 里的环境变量，所以桌面应用请用 `local.env`：
+
+- macOS：`~/Library/Application Support/dev.flow2api.desktop/local.env`
+- Windows：`%APPDATA%\dev.flow2api.desktop\local.env`
+
+```sh
+FLOW2API_PREFERRED_EMAILS=you@example.com,another@example.com
+```
+
 ## 构建安装包
 
 在 `desktop` 目录：

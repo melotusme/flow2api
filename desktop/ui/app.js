@@ -607,13 +607,18 @@ function renderAccounts(){
   $('account').closest('label').hidden=state.accounts.length<2;
 }
 
-const preferredEmails=['account1@example.com','account2@example.com','account3@example.com'];
-for(const email of preferredEmails){
-  $('preferred-emails').append(button(email,()=>{
-    $('email').value=email;
-    $('email').focus();
-  }));
-}
+// Personal emails stay on this device: FLOW2API_PREFERRED_EMAILS or <app data>/local.env.
+const preferredBox=$('preferred-emails');
+preferredBox.closest('.preferred-accounts').hidden=true;
+invoke('preferred_emails').then(emails=>{
+  for(const email of emails){
+    preferredBox.append(button(email,()=>{
+      $('email').value=email;
+      $('email').focus();
+    }));
+  }
+  preferredBox.closest('.preferred-accounts').hidden=!emails.length;
+}).catch(()=>{});
 
 function mediaCard(media){
   const card=node('article',undefined,'media-card');

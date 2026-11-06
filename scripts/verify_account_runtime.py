@@ -1,6 +1,7 @@
 """Live local account check. Credentials are read locally and never printed."""
 import argparse
 import json
+import os
 import sqlite3
 import urllib.error
 import urllib.request
@@ -26,8 +27,11 @@ c = sqlite3.connect("data/flow.db")
 c.row_factory = sqlite3.Row
 creds = dict(c.execute("select username,password from admin_config limit 1").fetchone())
 session = request("/api/login", creds)["token"]
-row = c.execute("select id from tokens where email=?", ("account1@example.com",)).fetchone()
-assert row, "Default account missing"
+email = os.environ.get("FLOW2API_VERIFY_EMAIL", "").strip()
+if not email:
+    raise SystemExit("Set FLOW2API_VERIFY_EMAIL to the account to check (kept local, not in git).")
+row = c.execute("select id from tokens where email=?", (email,)).fetchone()
+assert row, f"Account missing: {email}"
 token_id = row["id"]
 result = request(f"/api/tokens/{token_id}/refresh-credits", {}, session)
 print("Balance:", result)
