@@ -23,3 +23,14 @@ curl -s localhost:8000/health
 # --- 遗留 ---
 - 未添加 Flow Token，无法实际生成
 ```
+
+## GitHub Actions 额度约束（必须遵守）
+
+账户是 GitHub Free，私有仓库每月只有 $12 的 Actions 额度，用完后 Actions 会被暂停（预算为 $0，不会扣费）。macOS runner 单价约为 Linux 的 10 倍，是主要开销。
+
+- **macOS 版本只在本机构建**：构建、测试、签名、打包、上传都在本机 Mac 上做。不要在私有仓库的工作流里使用 `macos-*` runner，检查、测试、发布工作流都一样。
+- **不要定时任务**：不要添加 `schedule` / cron 触发的工作流，发布只能手动触发。
+- 新增或修改工作流前，先确认不会加回 macOS runner 或定时触发；拿不准就先问用户。
+- 公开仓库的 Actions 免费，不受以上额度限制。
+- 本项目现状：本仓库（melotusme/flow2api）是公开的，`desktop-build.yml` 里的 macOS 检查免费，可以保留。私有发布仓库 `melotusme/flow2api-releases` 的 `release.yml` 仍在 CI 上构建 macOS universal，还没改成本机构建（可参考 `desktop/scripts/build-local-macos.sh`）。改好之前要发新版，先问用户。
+- 不要把个人邮箱、本机绝对路径、机器名写进代码或文档：这个仓库是公开的。
