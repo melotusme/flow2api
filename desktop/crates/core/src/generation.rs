@@ -267,6 +267,17 @@ impl App {
         if self.status().queued >= 128 {
             bail!("排队任务过多，请稍后提交");
         }
+        if request.account_id.is_none() {
+            if let Some(video_id) = request.video_id.as_deref() {
+                if let Ok(items) = self.store.media() {
+                    if let Some(source) = items.into_iter().find(|m| m.media_id == video_id) {
+                        if let Ok(source_task) = self.store.task(&source.task_id) {
+                            request.account_id = source_task.request.account_id;
+                        }
+                    }
+                }
+            }
+        }
         let accounts = self.store.accounts()?;
         let account = match request.account_id.as_deref() {
             Some(id) => accounts.into_iter().find(|a| {

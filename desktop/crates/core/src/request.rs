@@ -22,6 +22,39 @@ pub fn openai(body: &Value) -> Result<GenerationRequest> {
         .as_array()
         .and_then(|messages| messages.last())
     else {
+        if let Some(prompt) = body["prompt"].as_str() {
+            let mut request = empty(model);
+            request.prompt = prompt.trim().into();
+            request.images = body["images"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            if request.images.is_empty() {
+                if let Some(image) = body["image"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    request.images.push(image.into());
+                }
+            }
+            request.video_id = body["video_id"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned);
+            request.account_id = body["account_id"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned);
+            return Ok(request);
+        }
         return gemini(model, body);
     };
     let mut request = empty(model);
@@ -53,6 +86,20 @@ pub fn openai(body: &Value) -> Result<GenerationRequest> {
         if let Some(image) = body["image"].as_str().filter(|s| !s.is_empty()) {
             request.images.push(image.into());
         }
+    }
+    if request.video_id.is_none() {
+        request.video_id = body["video_id"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+    }
+    if request.account_id.is_none() {
+        request.account_id = body["account_id"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
     }
     request.prompt = texts
         .into_iter()

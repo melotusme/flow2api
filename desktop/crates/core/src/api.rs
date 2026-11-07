@@ -23,6 +23,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/models", get(gemini_models))
         .route("/v1beta/models", get(gemini_models))
         .route("/v1/chat/completions", post(completions))
+        .route("/v1/tasks", post(create_task))
+        .route("/v1/tasks/{id}", get(get_task))
+        .route("/v1/tasks/{id}/cancel", post(cancel_task))
         .route("/models/{action}", get(gemini_model).post(gemini_generate))
         .route(
             "/v1beta/models/{action}",
@@ -191,6 +194,90 @@ async fn completions(
     let content = markdown(&app, &task);
     Ok(Json(json!({"id":task.id,"object":"chat.completion","created":chrono::Utc::now().timestamp(),"model":task.request.model,"choices":[{"index":0,"message":{"role":"assistant","content":content},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}})).into_response())
 }
+fn base_address(app: &App) -> String {
+    app.status().address.unwrap_or_else(|| {
+        format!(
+            "http://127.0.0.1:{}",
+            app.store.settings().map(|s| s.port).unwrap_or(8000)
+        )
+    })
+}
+fn task_json(app: &App, task: &Task) -> Value {
+    let address = base_address(app);
+    let results: Vec<Value> = task
+        .results
+        .iter()
+        .map(|m| {
+            json!({
+                "kind": m.kind,
+                "filename": m.filename,
+                "size": m.size,
+                "url": format!("{address}/media/{}", m.filename),
+                "download_url": format!("{address}/media/{}?download=true", m.filename),
+                "media_id": m.media_id,
+                "created_at": m.created_at,
+            })
+        })
+        .collect();
+    json!({
+        "id": task.id,
+        "object": "flow2api.task",
+        "model": task.request.model,
+        "state": task.state,
+        "stage": task.stage,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "error": task.error,
+        "results": results,
+    })
+}
+async fn create_task(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    authorize(&app, &headers, &query)?;
+    let mut request = crate::request::openai(&body)?;
+    let settings = app.store.settings()?;
+    crate::request::append_history(&mut request, &body, &settings).await?;
+    crate::resolver::prepare(&mut request, &body, &settings).await?;
+    let task = app.submit(request).await?;
+    if body["wait"] == true {
+        let task = wait_task(&app, &task.id).await?;
+        if task.state != "succeeded" {
+            return Err(ApiError(
+                StatusCode::BAD_GATEWAY,
+                task.error.unwrap_or_else(|| "任务失败".into()),
+            ));
+        }
+        return Ok(Json(task_json(&app, &task)));
+    }
+    Ok(Json(task_json(&app, &task)))
+}
+async fn get_task(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    authorize(&app, &headers, &query)?;
+    let task = app
+        .store
+        .task(&id)
+        .map_err(|_| ApiError(StatusCode::NOT_FOUND, "任务不存在".into()))?;
+    Ok(Json(task_json(&app, &task)))
+}
+async fn cancel_task(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    authorize(&app, &headers, &query)?;
+    let task = app.cancel_task(&id).await?;
+    Ok(Json(task_json(&app, &task)))
+}
 async fn wait_task(app: &App, id: &str) -> Result<Task, ApiError> {
     loop {
         let task = app.store.task(id)?;
@@ -201,12 +288,7 @@ async fn wait_task(app: &App, id: &str) -> Result<Task, ApiError> {
     }
 }
 fn markdown(app: &App, task: &Task) -> String {
-    let address = app.status().address.unwrap_or_else(|| {
-        format!(
-            "http://127.0.0.1:{}",
-            app.store.settings().map(|s| s.port).unwrap_or(8000)
-        )
-    });
+    let address = base_address(app);
     task.results
         .iter()
         .map(|m| {
@@ -864,6 +946,85 @@ mod tests {
         let resp: Response = router(app.clone()).oneshot(post_req).await?;
         assert_eq!(resp.status(), StatusCode::GONE);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn task_routes_support_lookup_cancel_and_auth() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let app = App::open(directory.path())?;
+        let key = app.store.settings()?.api_key;
+        let filename = format!("{}.mp4", "b".repeat(64));
+        let queued = Task {
+            id: "task-queued".into(),
+            request: GenerationRequest {
+                model: "veo-3.1-fast-8s-landscape".into(),
+                prompt: "ocean waves".into(),
+                account_id: None,
+                images: vec![],
+                video_id: None,
+            },
+            state: "queued".into(),
+            stage: "等待执行".into(),
+            created_at: now(),
+            updated_at: now(),
+            error: None,
+            results: vec![Media {
+                filename: filename.clone(),
+                kind: "video".into(),
+                size: 1024,
+                created_at: now(),
+                task_id: "task-queued".into(),
+                media_id: "media-123".into(),
+                prompt: "ocean waves".into(),
+                model: "veo-3.1-fast-8s-landscape".into(),
+            }],
+        };
+        app.store.save_task(&queued)?;
+
+        let unauth = axum::http::Request::builder()
+            .uri("/v1/tasks/task-queued")
+            .body(Body::empty())?;
+        assert_eq!(
+            router(app.clone()).oneshot(unauth).await?.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let missing = axum::http::Request::builder()
+            .uri("/v1/tasks/no-such-task")
+            .header("authorization", format!("Bearer {key}"))
+            .body(Body::empty())?;
+        assert_eq!(
+            router(app.clone()).oneshot(missing).await?.status(),
+            StatusCode::NOT_FOUND
+        );
+
+        let lookup = axum::http::Request::builder()
+            .uri("/v1/tasks/task-queued")
+            .header("authorization", format!("Bearer {key}"))
+            .body(Body::empty())?;
+        let resp = router(app.clone()).oneshot(lookup).await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 1_000_000).await?)?;
+        assert_eq!(body["id"], "task-queued");
+        assert_eq!(body["state"], "queued");
+        assert_eq!(body["results"][0]["media_id"], "media-123");
+        assert!(body["results"][0]["download_url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("/media/{filename}?download=true")));
+
+        let cancel = axum::http::Request::builder()
+            .method("POST")
+            .uri("/v1/tasks/task-queued/cancel")
+            .header("authorization", format!("Bearer {key}"))
+            .body(Body::empty())?;
+        let resp = router(app.clone()).oneshot(cancel).await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 1_000_000).await?)?;
+        assert_eq!(body["state"], "cancelled");
         Ok(())
     }
 }
