@@ -70,7 +70,7 @@ rtk proxy curl -fsS http://127.0.0.1:8000/metrics
 rtk proxy cargo test --manifest-path desktop/Cargo.toml -p flow2api-core browser_transport_detects_closed_page_and_releases_profile -- --ignored --nocapture
 ```
 
-## 本机私有设置
+## 本机设置（不进 git）
 
 个人邮箱等只放在本机，不进 git、不打进安装包。
 
@@ -104,7 +104,7 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 本机已生成未签名的通用开发 ZIP：`../dist/flow2api-macos-universal-debug-20261027.zip`。它包含 arm64 与 x86_64 程序，当前 Apple Silicon Mac 已启动验证；Intel Mac 实机与正式签名尚未验证。开发包不代表完整 Flow 功能验收通过。
 
-本机也已通过 cargo-xwin 交叉编译 Windows x64 程序，并产出 `../dist/Flow2API_0.1.0_x64-setup.exe`。那是 0.1.0 未签名开发包，不是 0.2.0 私有发布。交叉编译步骤见 `../docs/windows-cross-build.md`。
+本机也已通过 cargo-xwin 交叉编译 Windows x64 程序，并产出 `../dist/Flow2API_0.1.0_x64-setup.exe`。那是 0.1.0 未签名开发包，不是正式发布。交叉编译步骤见 `../docs/windows-cross-build.md`。
 
 ## WebDAV
 
@@ -116,38 +116,33 @@ Windows 安装器使用当前用户模式；缺少 WebView2 时联网安装。ma
 
 默认开启本机自动更新：启动 30 秒后检查，之后每 6 小时检查一次；失败 30 分钟后重试。原生后台调度在关闭窗口后继续运行。检查时间、下载状态和错误显示在「设置与接入 → 软件版本与更新」。可以在运行设置中关闭自动更新。
 
-0.3.2 起，私有更新支持每台电脑自己的 GitHub Desktop（macOS / Windows）或 GitHub CLI 登录和发行仓库读取权限。CLI 缺失、未登录、失效或无权限时，自动尝试 Desktop 的 GitHub.com 登录；设置页显示实际认证来源。macOS 首次读取可能需要解锁钥匙串，并手动检查更新以允许 Flow2API 读取。后台检查不会主动弹出授权窗口。Linux 暂使用 CLI。凭据仅由原生后端读取，不进入网页、配置文件、包或日志。资产地址限定到固定仓库的数字 asset ID；跨域 CDN 下载不带凭据。安装前校验包签名及版本，等待执行/排队任务全部结束，再停止 API、安装并重启；安装失败恢复 API。账号资料和数据库留在原目录。
+0.3.3 起，更新来自公开的 `melotusme/flow2api-releases`，不需要 GitHub 登录。应用匿名读取最新 Release 和 `latest.json`，只接受该仓库的下载地址，跳转只允许到 GitHub 的发布 CDN。安装前校验包签名及版本，等待执行/排队任务全部结束，再停止 API、安装并重启；安装失败恢复 API。账号资料和数据库留在原目录。0.3.2 及以前的客户端仍用本机 GitHub 登录读取，公开仓库同样能读，所以会照常升级到 0.3.3。
 
 旧版本需要本次从正式 Release 引导安装一次；以后由 App 检查和更新。Linux x64 提供 AppImage，放在可写的用户应用目录（如 `~/.local/opt/flow2api/`），保留可执行权限；运行环境需 WebKitGTK 4.1、GTK3、libayatana-appindicator、FUSE 2（或 `APPIMAGE_EXTRACT_AND_RUN=1`）及已登录的桌面 Secret Service。默认浏览器连接也适用于 Linux Chrome/Chromium。
 
-## 私有发布与安装
+## 发布与安装
 
-上游源码仓库是公开的 `TheSmallHanCat/flow2api`。当前账号不能向它推送，所以发布构建读取公开 fork `melotusme/flow2api` 上的同一套提交。安装包只发布到私有 `melotusme/flow2api-releases`，Homebrew tap 是私有 `melotusme/homebrew-flow2api`。审阅用流程在 `.github/release-workflow.yml`，执行副本在发布仓库的 `.github/workflows/release.yml`，只接受手动触发。签名私钥在仓库外的 `~/.local/share/flow2api/signing/`，并作为发布仓库 Secret `TAURI_SIGNING_PRIVATE_KEY`。更新签名不是 Apple 公证，也不是 Windows Authenticode。macOS 使用 ad-hoc 签名。Windows 只有 x64 安装包，没有原生 ARM64。
+上游源码仓库是公开的 `TheSmallHanCat/flow2api`。当前账号不能向它推送，所以发布构建读取公开 fork `melotusme/flow2api` 上的同一套提交。安装包发布到公开的 `melotusme/flow2api-releases`，Homebrew tap 是公开的 `melotusme/homebrew-flow2api`。审阅用流程在 `.github/release-workflow.yml`，执行副本在发布仓库的 `.github/workflows/release.yml`，只接受手动触发；公开仓库的 Actions 免费，macOS、Windows、Linux 都在 CI 上构建。签名私钥在仓库外的 `~/.local/share/flow2api/signing/`，并作为发布仓库 Secret `TAURI_SIGNING_PRIVATE_KEY`。更新签名不是 Apple 公证，也不是 Windows Authenticode。macOS 使用 ad-hoc 签名。Windows 只有 x64 安装包，没有原生 ARM64。
 
-源码提交到远程并且macOS、Windows、Linux 三个平台都构建成功之后，才运行发布仓库的 Publish signed release。缺一个平台不能成为 latest。`v0.2.0` 已正式发布并同步更新 tap 仓库 `Casks/flow2api.rb`（后续新版本发布后，在 tap 仓库执行 `python3 scripts/update-cask.py` 更新校验值并提交）。
+发布步骤：版本号和 `release-notes.md` 提交推送到 fork 的 `main`，然后运行 `gh workflow run "Publish signed release" -R melotusme/flow2api-releases -f source_ref=main`。三个平台都构建成功才会发布，缺一个平台不能成为 latest。发布后在 tap 仓库执行 `python3 scripts/update-cask.py` 更新版本和校验值并提交。
 
-macOS，在已有正式 Release 之后：
+macOS：
 
 ```sh
-brew install gh
-gh auth login
-gh auth setup-git
-brew tap melotusme/flow2api https://github.com/melotusme/homebrew-flow2api.git
-brew trust --cask melotusme/flow2api/flow2api
+brew tap melotusme/flow2api
 brew install --cask melotusme/flow2api/flow2api
 ```
 
-Windows x64，在已有正式 Release 之后。先安装 GitHub CLI 并 `gh auth login`，必要时重开 PowerShell：
+Windows x64（PowerShell）：
 
 ```powershell
-$repo = 'melotusme/flow2api-releases'
-$tag = 'v0.3.2'
+$base = 'https://github.com/melotusme/flow2api-releases/releases/latest/download'
 $asset = 'Flow2API.windows.x64.exe'
-$dir = Join-Path $env:TEMP ('desktop-setup-' + [guid]::NewGuid())
+$dir = Join-Path $env:TEMP ('flow2api-setup-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $dir | Out-Null
-gh release download $tag --repo $repo --pattern $asset --pattern SHA256SUMS --dir $dir
-if ($LASTEXITCODE -ne 0) { throw '安装包下载失败' }
 $setup = Join-Path $dir $asset
+Invoke-WebRequest "$base/$asset" -OutFile $setup
+Invoke-WebRequest "$base/SHA256SUMS" -OutFile (Join-Path $dir 'SHA256SUMS')
 $pattern = '^([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape($asset) + '$'
 $lines = @(Get-Content (Join-Path $dir 'SHA256SUMS') | Where-Object { $_ -match $pattern })
 if ($lines.Count -ne 1) { throw '缺少唯一的安装包校验记录' }
@@ -157,7 +152,7 @@ $p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
 if ($p.ExitCode -ne 0) { throw "安装失败：$($p.ExitCode)" }
 ```
 
-这两段命令还没有在目标电脑上跑过。应用内“检查更新”用本机 `gh` 登录读取固定的私有仓库资产，令牌不进界面。没有 WinGet 包。
+之后由应用内“检查更新”升级。没有 WinGet 包。
 
 ## 从 Python 版迁移
 

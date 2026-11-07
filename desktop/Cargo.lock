@@ -1264,7 +1264,7 @@ dependencies = [
 
 [[package]]
 name = "flow2api-core"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1293,14 +1293,11 @@ dependencies = [
 
 [[package]]
 name = "flow2api-desktop"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
- "core-foundation 0.10.1",
  "flow2api-core",
  "reqwest 0.12.28",
- "security-framework 3.7.0",
- "security-framework-sys",
  "serde",
  "serde_json",
  "tauri",
@@ -1313,7 +1310,6 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "uuid",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

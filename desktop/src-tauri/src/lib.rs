@@ -1,5 +1,4 @@
 mod local_env;
-mod update_auth;
 mod updates;
 
 use flow2api_core::{catalog, model::*, App};
@@ -845,9 +844,9 @@ pub fn run() {
             save_webdav,
             import_verge_webdav,
             webdav_action,
-            updates::private_update_status,
-            updates::check_private_update,
-            updates::install_private_update
+            updates::update_status,
+            updates::check_update,
+            updates::install_update
         ])
         .build(tauri::generate_context!())
         .expect("Flow2API desktop initialization failed")

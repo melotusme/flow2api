@@ -1,3 +1,10 @@
+# v0.3.3 · 公开发布与异步任务接口
+
+- 发行仓库改为公开：检查和下载更新不再需要 GitHub CLI 或 GitHub Desktop 登录，仍在安装前校验签名和版本。下载地址限定在发行仓库，跳转只允许到 GitHub 发布 CDN。
+- 新增 `/v1/tasks` 异步任务接口：提交后立即返回任务 ID，可查询进度和取消。
+- 视频续写自动匹配生成原视频的账号。
+- 常用账号快捷按钮改为读取本机 `local.env` 或环境变量 `FLOW2API_PREFERRED_EMAILS`，源码不再包含个人邮箱。
+
 # v0.3.2 · 复用 GitHub Desktop 登录
 
 - 私有更新新增 macOS 钥匙串、Windows 凭据管理器的 GitHub Desktop 登录复用；CLI 不可用、登录失效或无仓库权限时自动尝试 Desktop。

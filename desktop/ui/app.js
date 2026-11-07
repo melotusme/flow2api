@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.3.2';
+const APP_VERSION='0.3.3';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -896,11 +896,10 @@ for(const [id,name] of [['webdav-test','test'],['webdav-push','push'],['webdav-p
 
 function renderUpdateStatus(status){
   if(!status?.message)return;
-  const source=status.auth_source?` 认证来源：${status.auth_source}。`:'';
   const checked=status.checked_at?` 上次检查：${new Date(status.checked_at*1000).toLocaleString()}。`:'';
-  $('update-status').textContent=status.message+source+checked;
+  $('update-status').textContent=status.message+checked;
   const dialogStatus=document.getElementById('dialog-update-status');
-  if(dialogStatus)dialogStatus.textContent=status.message+source+checked;
+  if(dialogStatus)dialogStatus.textContent=status.message+checked;
   if($('update-badge'))$('update-badge').textContent=({error:'更新失败',checking:'检查中',current:'已是最新',available:'有新版本',waiting:'等待空闲',downloading:'下载中',installing:'安装中'})[status.phase]||'检查更新';
 }
 
@@ -923,7 +922,7 @@ function showUpdateDialog(autoCheck=false){
 
     const body=node('div');
     body.style.margin='20px 0';
-    const statusText=node('p','点击“立即检查”将复用本机 GitHub Desktop 或 GitHub CLI 登录，检查私有仓库最新版本。','hint');
+    const statusText=node('p','点击“立即检查”从公开的 GitHub Release 检查最新版本，无需登录。','hint');
     statusText.id='dialog-update-status';
     const releaseNotes=node('pre',undefined,'update-notes');
     releaseNotes.id='dialog-update-notes';
@@ -966,21 +965,19 @@ async function runUpdateCheck(triggerBtn){
   };
   setStatus('正在连接 GitHub 检查最新版本……');
   try{
-    const found=await invoke('check_private_update');
+    const found=await invoke('check_update');
     pendingUpdate=found;
     if(!found){
       $('install-update').hidden=true;
       const dialogInstall=document.getElementById('dialog-install-btn');
       if(dialogInstall)dialogInstall.style.display='none';
-      const auth=await invoke('private_update_status');
-      const msg=`当前已是最新版本（v${APP_VERSION}）。${auth.auth_source?` 认证来源：${auth.auth_source}。`:''}`;
+      const msg=`当前已是最新版本（v${APP_VERSION}）。`;
       setStatus(msg);
       if($('update-badge'))$('update-badge').textContent='已是最新';
       notice(msg);
       return;
     }
-    const auth=await invoke('private_update_status');
-    const msg=`发现新版本 v${found.version}（当前 v${found.current_version||APP_VERSION}）。${auth.auth_source?` 认证来源：${auth.auth_source}。`:''}`;
+    const msg=`发现新版本 v${found.version}（当前 v${found.current_version||APP_VERSION}）。`;
     setStatus(msg,found.body||'');
     $('install-update').hidden=false;
     const dialogInstall=document.getElementById('dialog-install-btn');
@@ -999,7 +996,7 @@ async function runUpdateCheck(triggerBtn){
 async function runInstallUpdate(triggerBtn){
   if(!pendingUpdate)throw Error('请先检查新版本');
   action(triggerBtn||$('install-update'),async()=>{
-    await invoke('install_private_update');
+    await invoke('install_update');
     notice('更新包下载校验完成，正在重启应用……');
   });
 }
@@ -1016,21 +1013,21 @@ if($('sidebar-check-update'))$('sidebar-check-update').onclick=()=>showUpdateDia
     await window.__TAURI__.event.listen('notice',event=>notice(event.payload,String(event.payload).startsWith('无法')));
     await window.__TAURI__.event.listen('account-synced',()=>{refresh().catch(()=>{});});
     await window.__TAURI__.event.listen('check_update',()=>{showUpdateDialog(true);});
-    await window.__TAURI__.event.listen('private-update-progress',event=>{
+    await window.__TAURI__.event.listen('update-progress',event=>{
       const received=event.payload.received,total=event.payload.total;
       const msg=total?`已下载 ${(received/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB (${Math.round(received/total*100)}%)`:`已下载 ${(received/1048576).toFixed(1)} MB`;
       $('update-status').textContent=msg;
       const dialogStatus=document.getElementById('dialog-update-status');
       if(dialogStatus)dialogStatus.textContent=msg;
     });
-    await window.__TAURI__.event.listen('private-update-installing',()=>{
+    await window.__TAURI__.event.listen('update-installing',()=>{
       const msg='正在校验签名并安装，当前版本会保留到安装成功。';
       $('update-status').textContent=msg;
       const dialogStatus=document.getElementById('dialog-update-status');
       if(dialogStatus)dialogStatus.textContent=msg;
     });
-    await window.__TAURI__.event.listen('private-update-status',event=>renderUpdateStatus(event.payload));
-    renderUpdateStatus(await invoke('private_update_status'));
+    await window.__TAURI__.event.listen('update-status',event=>renderUpdateStatus(event.payload));
+    renderUpdateStatus(await invoke('update_status'));
     await reloadSettings();
     await restoreDraft();
     state.models=(await invoke('models')).data;

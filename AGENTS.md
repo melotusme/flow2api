@@ -32,5 +32,5 @@ curl -s localhost:8000/health
 - **不要定时任务**：不要添加 `schedule` / cron 触发的工作流，发布只能手动触发。
 - 新增或修改工作流前，先确认不会加回 macOS runner 或定时触发；拿不准就先问用户。
 - 公开仓库的 Actions 免费，不受以上额度限制。
-- 本项目现状：本仓库（melotusme/flow2api）是公开的，`desktop-build.yml` 里的 macOS 检查免费，可以保留。私有发布仓库 `melotusme/flow2api-releases` 的 `release.yml` 仍在 CI 上构建 macOS universal，还没改成本机构建（可参考 `desktop/scripts/build-local-macos.sh`）。改好之前要发新版，先问用户。
+- 本项目现状（2026-11-07 起）：相关仓库全部公开——源码 fork `melotusme/flow2api`、发行仓库 `melotusme/flow2api-releases`、tap `melotusme/homebrew-flow2api`。公开仓库 Actions 免费，发布直接走发行仓库的 CI（含 macOS），不需要本机打包上传。应用更新匿名读取公开 Release，不需要 GitHub 登录。
 - 不要把个人邮箱、本机绝对路径、机器名写进代码或文档：这个仓库是公开的。

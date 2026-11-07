@@ -1,4 +1,4 @@
-# Review copy. The running workflow lives in the private melotusme/flow2api-releases
+# Review copy. The running workflow lives in the public melotusme/flow2api-releases
 # repository. This file is not under workflows/, so the public source does not publish.
 # Source is melotusme/flow2api because this account cannot push TheSmallHanCat/flow2api.
 name: Publish signed release

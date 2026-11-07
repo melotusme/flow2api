@@ -1,6 +1,6 @@
 # Flow 登录态同步
 
-当前 Flow 地址：[https://flow.google.com/](https://flow.google.com/)。扩展会保存邮箱和服务地址。常用邮箱只放在本机，见 desktop/README.md 的「本机私有设置」。
+当前 Flow 地址：[https://flow.google.com/](https://flow.google.com/)。扩展会保存邮箱和服务地址。常用邮箱只放在本机，见 desktop/README.md 的「本机设置（不进 git）」。
 
 ## 已实测可用：Chrome / ego lite 扩展
 
