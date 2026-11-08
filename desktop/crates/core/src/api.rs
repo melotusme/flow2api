@@ -36,8 +36,14 @@ pub fn router(app: Arc<App>) -> Router {
             "/api/browser-login/sync",
             post(sync_browser_login).options(cors_options),
         )
-        .route("/api/browser-bridge/pair", post(pair_browser))
-        .route("/api/browser-bridge/poll", post(poll_browser))
+        .route(
+            "/api/browser-bridge/pair",
+            post(pair_browser).options(cors_options),
+        )
+        .route(
+            "/api/browser-bridge/poll",
+            post(poll_browser).options(cors_options),
+        )
         .route(
             "/extension/flow2api-flow-login-sync.user.js",
             get(userscript_content),
@@ -545,6 +551,7 @@ async fn sync_browser_login(
 
 #[derive(serde::Deserialize)]
 struct PairBrowser {
+    #[serde(default)]
     code: String,
     email: String,
 }

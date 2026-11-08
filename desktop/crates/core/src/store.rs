@@ -134,6 +134,9 @@ impl Store {
             if account.project_id.chars().count() > 200 {
                 bail!("同步项目编号过长");
             }
+            if account.note.chars().count() > 500 {
+                bail!("同步账号备注过长");
+            }
         }
         let connection = self.connection.lock().unwrap();
         connection.execute_batch("BEGIN IMMEDIATE")?;
@@ -160,14 +163,7 @@ impl Store {
                     .cloned()
                     .unwrap_or_else(|| Account {
                         id: synced.id.clone(),
-                        email: String::new(),
-                        enabled: true,
-                        project_id: String::new(),
-                        last_synced: None,
-                        credits: None,
-                        browser_data_dir: String::new(),
-                        browser_profile: String::new(),
-                        browser_bridge: false,
+                        ..Account::default()
                     });
                 if account.email != synced.email {
                     account.last_synced = None;
@@ -176,6 +172,10 @@ impl Store {
                 account.email = synced.email.trim().into();
                 account.enabled = synced.enabled;
                 account.project_id = synced.project_id.clone();
+                account.priority = synced.priority.clamp(-1000, 1000);
+                account.note = synced.note.trim().into();
+                account.image_enabled = synced.image_enabled;
+                account.video_enabled = synced.video_enabled;
                 connection.execute(
                     "INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
                     params![account.id, serde_json::to_string(&account)?],

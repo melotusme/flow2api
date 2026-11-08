@@ -77,15 +77,15 @@ impl App {
             status.ready_accounts = accounts
                 .iter()
                 .filter(|a| {
-                    a.enabled
+                    a.available()
                         && a.last_synced.is_some()
                         && (!a.browser_bridge || self.bridge.ready(&a.id))
                 })
                 .count();
-            if accounts.iter().any(|a| a.enabled && a.browser_bridge) {
+            if accounts.iter().any(|a| a.available() && a.browser_bridge) {
                 let connected = accounts
                     .iter()
-                    .filter(|a| a.enabled && a.browser_bridge && self.bridge.ready(&a.id))
+                    .filter(|a| a.available() && a.browser_bridge && self.bridge.ready(&a.id))
                     .count();
                 status.browser = format!("默认浏览器：{connected} 个连接可用");
             }
@@ -105,11 +105,11 @@ impl App {
         let accounts = self.store.accounts()?;
         self.change_status(|s| {
             s.total_accounts = accounts.len();
-            s.accounts = accounts.iter().filter(|a| a.enabled).count();
+            s.accounts = accounts.iter().filter(|a| a.available()).count();
             s.ready_accounts = accounts
                 .iter()
                 .filter(|a| {
-                    a.enabled
+                    a.available()
                         && a.last_synced.is_some()
                         && (!a.browser_bridge || self.bridge.ready(&a.id))
                 })

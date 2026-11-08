@@ -444,6 +444,7 @@ pub fn import(store: &Store, path: &Path, import_settings: bool) -> Result<Repor
                     browser_data_dir: String::new(),
                     browser_profile: String::new(),
                     browser_bridge: false,
+                    ..Account::default()
                 };
                 tx.execute(
                     "INSERT INTO accounts(id,value) VALUES(?1,?2)",
@@ -810,6 +811,7 @@ mod tests {
             browser_data_dir: String::new(),
             browser_profile: String::new(),
             browser_bridge: false,
+            ..Account::default()
         };
         store.save_account(&account)?;
         let key = store.settings()?.api_key;

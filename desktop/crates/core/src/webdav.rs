@@ -53,6 +53,14 @@ struct PortableAccount {
     email: String,
     enabled: bool,
     project_id: String,
+    #[serde(default)]
+    priority: i32,
+    #[serde(default)]
+    note: String,
+    #[serde(default = "crate::model::default_true")]
+    image_enabled: bool,
+    #[serde(default = "crate::model::default_true")]
+    video_enabled: bool,
 }
 
 trait Secrets: Send + Sync {
@@ -301,6 +309,10 @@ fn portable_from(store: &Store) -> Result<Portable, String> {
             email: account.email,
             enabled: account.enabled,
             project_id: account.project_id,
+            priority: account.priority,
+            note: account.note,
+            image_enabled: account.image_enabled,
+            video_enabled: account.video_enabled,
         })
         .collect();
     let portable = Portable {
@@ -329,6 +341,7 @@ impl Portable {
                 || !seen.insert(account.id.clone())
                 || !account.email.contains('@')
                 || account.project_id.chars().count() > 200
+                || account.note.chars().count() > 500
             {
                 return Err("同步账号记录无效".into());
             }
@@ -343,6 +356,10 @@ impl Portable {
                 email: account.email.clone(),
                 enabled: account.enabled,
                 project_id: account.project_id.clone(),
+                priority: account.priority,
+                note: account.note.clone(),
+                image_enabled: account.image_enabled,
+                video_enabled: account.video_enabled,
             })
             .collect()
     }
@@ -595,6 +612,7 @@ mod tests {
                 browser_data_dir: "/tmp/chrome profile".into(),
                 browser_profile: "Default".into(),
                 browser_bridge: false,
+                ..Account::default()
             })
             .unwrap();
         let payload = serde_json::to_string(&portable_from(&store).unwrap()).unwrap();
@@ -625,6 +643,7 @@ mod tests {
                 browser_data_dir: directory.path().join("profile").display().to_string(),
                 browser_profile: "Default".into(),
                 browser_bridge: false,
+                ..Account::default()
             })
             .unwrap();
         store
@@ -638,12 +657,20 @@ mod tests {
                         email: "moved@example.test".into(),
                         enabled: false,
                         project_id: "p1".into(),
+                        priority: 100,
+                        note: "主力号".into(),
+                        image_enabled: true,
+                        video_enabled: false,
                     },
                     SyncedAccount {
                         id: "cloud".into(),
                         email: "cloud@example.test".into(),
                         enabled: true,
                         project_id: String::new(),
+                        priority: 0,
+                        note: String::new(),
+                        image_enabled: true,
+                        video_enabled: true,
                     },
                 ],
             )

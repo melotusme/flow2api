@@ -209,7 +209,77 @@ pub fn video_argument(
     ))
 }
 
+pub fn rpc_label(rpc: &str) -> &'static str {
+    match rpc {
+        "nzlxg" => "查询账号余额",
+        "jHPbke" => "创建 Flow 项目",
+        "maseQ" => "上传参考图",
+        "ogiZ0b" => "提交图片生成",
+        "SPrCad" => "图片高清放大",
+        "YhhmEf" => "提交文生视频",
+        "eb1hJf" => "提交图生视频（首帧）",
+        "nprQif" => "提交图生视频（首尾帧）",
+        "MZZa6b" => "提交多参考图视频",
+        "fZytfe" => "提交视频续写",
+        "p0UkFb" => "视频高清放大",
+        "jwpduf" => "轮询视频生成状态",
+        "as29s" => "查询视频媒体地址",
+        _ => "调用 Flow 接口",
+    }
+}
+
+pub fn explain_error_code(code: &str) -> (&'static str, &'static str) {
+    match code {
+        "PUBLIC_ERROR_MODEL_ACCESS_DENIED" | "ERROR_MODEL_ACCESS_DENIED" => (
+            "当前 Google 账号无该模型权限",
+            "该模型（如 Veo 3.1 高清／专业版）通常需要 Google AI Ultra 等高阶订阅。请将有权限账号设为高优先级、关闭此账号的视频生成开关，或改用 Fast 模型",
+        ),
+        "PUBLIC_ERROR_UNSAFE_GENERATION"
+        | "PUBLIC_ERROR_SAFETY_FILTER"
+        | "ERROR_UNSAFE_GENERATION" => (
+            "提示词或参考图触发了安全审核拦截",
+            "请调整提示词措辞或更换参考图后再试",
+        ),
+        "PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED" | "PUBLIC_ERROR_PERSON_GENERATION" => (
+            "参考图或提示词触发了人物保护策略",
+            "请更换不包含特定公众人物面部特征的参考图或描述",
+        ),
+        "PUBLIC_ERROR_QUOTA_EXCEEDED"
+        | "PUBLIC_ERROR_INSUFFICIENT_CREDITS"
+        | "ERROR_QUOTA_EXCEEDED"
+        | "ERROR_RESOURCE_EXHAUSTED" => (
+            "当前账号 AI 积分不足或达到配额上限",
+            "请在账号页同步核对剩余积分、临时禁用该账号，或切换到积分充足的账号",
+        ),
+        "PUBLIC_ERROR_RATE_LIMIT_EXCEEDED" | "PUBLIC_ERROR_TOO_MANY_REQUESTS" => (
+            "当前账号请求过于频繁，触发上游限流",
+            "建议将该账号临时禁用 15–60 分钟，或配置多个账号分摊并发",
+        ),
+        "PUBLIC_ERROR_INVALID_ARGUMENT" | "PUBLIC_ERROR_BAD_REQUEST" => (
+            "请求参数或参考图不被上游模型接受",
+            "请检查参考图格式、尺寸或源视频 ID 是否有效",
+        ),
+        "PUBLIC_ERROR_UNAUTHENTICATED" | "ERROR_UNAUTHENTICATED" => (
+            "Google Flow 登录状态已失效",
+            "请在账号管理页重新连接或同步该账号",
+        ),
+        _ => (
+            "上游服务拒绝了本次生成请求",
+            "请检查提示词、参考图与账号订阅权限，或切换其他账号重试",
+        ),
+    }
+}
+
+fn grpc_status_code(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(n) => n.as_i64().filter(|c| (1..=16).contains(c)),
+        Value::Array(a) => a.first().and_then(grpc_status_code),
+        _ => None,
+    }
+}
+
 pub fn parse_rpc(text: &str, rpc: &str) -> Result<Value> {
+    let action = rpc_label(rpc);
     for line in text
         .lines()
         .map(str::trim)
@@ -220,18 +290,45 @@ pub fn parse_rpc(text: &str, rpc: &str) -> Result<Value> {
         };
         for item in frame.as_array().into_iter().flatten() {
             if item[0] == "er" {
-                bail!("Flow RPC {rpc} 拒绝请求，请核对登录、权限和额度");
+                bail!("{action}被拒绝（Flow RPC {rpc}），请核对登录状态、订阅权限和积分余额");
             }
             if item[0] == "wrb.fr" && item[1] == rpc {
                 if let Some(code) = error_code(&item[5]) {
-                    bail!("Flow RPC 拒绝请求：{code}");
+                    let (summary, advice) = explain_error_code(&code);
+                    bail!("{action}被拒绝：{summary}（{code}）。{advice}");
                 }
-                let data = item[2].as_str().context("Flow RPC 返回错误或缺少数据")?;
+                let Some(data) = item[2].as_str() else {
+                    let detail = match grpc_status_code(&item[5]) {
+                        Some(3) => {
+                            format!("状态码 3 INVALID_ARGUMENT：{action}时参数或模型键不被接受")
+                        }
+                        Some(5) => format!(
+                            "状态码 5 NOT_FOUND：{action}时当前账号不支持该模型键或项目不存在"
+                        ),
+                        Some(7) => format!(
+                            "状态码 7 PERMISSION_DENIED：{action}时当前账号无此模型或功能权限"
+                        ),
+                        Some(8) => format!(
+                            "状态码 8 RESOURCE_EXHAUSTED：{action}时当前账号积分不足或触发限流"
+                        ),
+                        Some(16) => {
+                            "状态码 16 UNAUTHENTICATED：Google 登录状态已失效，请重新连接或同步账号"
+                                .into()
+                        }
+                        Some(code) => {
+                            format!("状态码 {code}：{action}时上游返回异常，请稍后重试或切换账号")
+                        }
+                        None => format!(
+                            "{action}未返回数据，可能是当前账号无该模型权限、积分不足或项目已失效"
+                        ),
+                    };
+                    bail!("Flow RPC 返回错误或缺少数据（{detail}）");
+                };
                 return serde_json::from_str(data).context("Flow RPC 数据格式错误");
             }
         }
     }
-    bail!("Flow RPC {rpc} 未返回有效数据；请检查登录状态")
+    bail!("{action}未返回有效数据（Flow RPC {rpc}）；请检查登录状态或重新连接账号")
 }
 pub fn error_code(value: &Value) -> Option<String> {
     match value {

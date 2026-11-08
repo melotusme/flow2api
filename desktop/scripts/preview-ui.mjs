@@ -8,7 +8,7 @@ const models={data:Object.entries(catalog).filter(([,m])=>m.config.listed!==fals
 const fixture=`
 'use strict';
 const sample='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXRkAAAAASUVORK5CYII=';
-const account={id:'demo',email:'creator@example.test',enabled:true,last_synced:new Date().toISOString(),credits:200,browser_bridge:true};
+const account={id:'demo',email:'creator@example.test',enabled:true,priority:100,note:'AI Ultra 主力',image_enabled:true,video_enabled:true,disabled_until:null,disabled_reason:null,last_error:null,consecutive_failures:0,last_synced:new Date().toISOString(),credits:25050,browser_bridge:true};
 const jobs=Array.from({length:43},(_,i)=>({id:'job-'+i,state:i===0?'queued':i===1?'failed':'succeeded',stage:i===0?'等待执行':i===1?'连接中断，请打开 Flow 后再次编辑':'已保存',error:i===1?'浏览器连接已断开，请打开 Flow 标签页':null,created_at:new Date(Date.now()-i*60000).toISOString(),updated_at:new Date(Date.now()-i*60000).toISOString(),request:{model:'gemini-3.1-flash-lite-image-square',prompt:'测试草稿 '+i+'：一只黄色陶瓷茶壶，摆在木桌上，窗边自然光。',images:[sample],account_id:'demo',video_id:null},results:[]}));
 let online=true,service=true,submissions=0,slowSubmit=0,denyDevice=false;
 let settings={port:8173,api_key:'fixture-key-not-a-credential',max_concurrent:1,image_timeout_seconds:300,video_timeout_seconds:1500,browser_executable:'',proxy_url:''};
@@ -38,8 +38,11 @@ window.__TAURI__={event:{listen:async(name,callback)=>{listeners[name]=callback}
     case 'start_service':service=true;return status();
     case 'stop_service':service=false;return status();
     case 'save_settings':settings=args.settings;return;
-    case 'save_account':account.enabled=args.enabled;return account;
-    case 'check_private_update':return null;
+    case 'save_account':account.enabled=args.enabled;if(args.priority!==undefined)account.priority=args.priority;if(args.note!==undefined)account.note=args.note;if(args.imageEnabled!==undefined)account.image_enabled=args.imageEnabled;if(args.videoEnabled!==undefined)account.video_enabled=args.videoEnabled;if(args.clearError)account.last_error=null;return account;
+    case 'temp_disable_account':account.disabled_until=args.minutes>0?new Date(Date.now()+args.minutes*60000).toISOString():null;account.disabled_reason=args.minutes>0?(args.reason||'手动临时禁用'):null;return account;
+    case 'sync_account':account.last_synced=new Date().toISOString();return account;
+    case 'update_status':return {phase:'idle',message:''};
+    case 'check_update':case 'check_private_update':return null;
     case 'open_flow_page':case 'open_userscript_url':case 'open_data':case 'open_media':return;
     default:throw Error('夹具未实现命令：'+name);
   }

@@ -131,6 +131,8 @@ impl App {
         let credits = flow::rpc(&mut session, "nzlxg", json!([]), None).await?;
         account.credits = Some(flow::credits(&credits)?);
         account.last_synced = Some(now());
+        account.last_error = None;
+        account.consecutive_failures = 0;
         self.store.save_account(&account)?;
         if account.browser_bridge {
             if let Some(peer) = self.bridge.get(id) {
@@ -202,12 +204,7 @@ impl App {
             id: id.into(),
             email,
             enabled: true,
-            project_id: String::new(),
-            last_synced: None,
-            credits: None,
-            browser_data_dir: String::new(),
-            browser_profile: String::new(),
-            browser_bridge: false,
+            ..Account::default()
         };
         if let Ok(credits) = flow::rpc(&mut session, "nzlxg", json!([]), None)
             .await
@@ -244,6 +241,8 @@ impl App {
         };
         account.credits = Some(flow::credits(&credits)?);
         account.last_synced = Some(now());
+        account.last_error = None;
+        account.consecutive_failures = 0;
         self.store.save_account(&account)?;
         self.change_status(|s| {
             s.browser = format!("已连接 {}", account.email);
@@ -263,7 +262,8 @@ impl App {
             .video_id
             .map(|id| id.trim().to_owned())
             .filter(|id| !id.is_empty());
-        validate(&request)?;
+        let model = validate(&request)?;
+        let is_video = model["config"]["type"] == "video";
         if self.status().queued >= 128 {
             bail!("排队任务过多，请稍后提交");
         }
@@ -279,26 +279,79 @@ impl App {
             }
         }
         let accounts = self.store.accounts()?;
+        let is_ready = |a: &Account| {
+            a.available()
+                && a.supports_kind(is_video)
+                && a.last_synced.is_some()
+                && (!a.browser_bridge || self.bridge.ready(&a.id))
+        };
         let account = match request.account_id.as_deref() {
-            Some(id) => accounts.into_iter().find(|a| {
-                a.id == id
-                    && a.enabled
-                    && a.last_synced.is_some()
-                    && (!a.browser_bridge || self.bridge.ready(&a.id))
-            }),
+            Some(id) => {
+                let candidate = accounts
+                    .into_iter()
+                    .find(|a| a.id == id)
+                    .context("所选账号不存在")?;
+                if !candidate.enabled {
+                    bail!(
+                        "所选账号 {} 已停用，请先启用或改用自动分配",
+                        candidate.email
+                    );
+                }
+                if candidate.temporarily_disabled() {
+                    let reason = candidate
+                        .disabled_reason
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .map(|r| format!("（{r}）"))
+                        .unwrap_or_default();
+                    bail!(
+                        "所选账号 {} 正在临时禁用冷却中{reason}，请在账号页解除临时禁用或改用其他账号",
+                        candidate.email
+                    );
+                }
+                if !candidate.supports_kind(is_video) {
+                    bail!(
+                        "所选账号 {} 已关闭{}生成开关，请在账号页开启或改用其他账号",
+                        candidate.email,
+                        if is_video { "视频" } else { "图片" }
+                    );
+                }
+                if !is_ready(&candidate) {
+                    bail!(
+                        "所选账号 {} 尚未完成登录同步或浏览器连接未就绪",
+                        candidate.email
+                    );
+                }
+                candidate
+            }
             None => {
                 let tasks = self.store.task_summaries()?;
+                let has_temp_disabled = accounts
+                    .iter()
+                    .any(|a| a.enabled && a.temporarily_disabled());
+                let has_kind_disabled = accounts
+                    .iter()
+                    .any(|a| a.available() && !a.supports_kind(is_video));
                 accounts
                     .into_iter()
-                    .filter(|a| {
-                        a.enabled
-                            && a.last_synced.is_some()
-                            && (!a.browser_bridge || self.bridge.ready(&a.id))
-                    })
+                    .filter(is_ready)
                     .min_by_key(|a| account_load(a, &tasks))
+                    .ok_or_else(|| {
+                        if has_temp_disabled {
+                            anyhow::anyhow!(
+                                "没有可用账号（部分账号处于临时禁用冷却中，可在账号页解除或等待恢复）"
+                            )
+                        } else if has_kind_disabled {
+                            anyhow::anyhow!(
+                                "没有开启{}生成且完成同步的可用账号，请在账号页检查能力开关",
+                                if is_video { "视频" } else { "图片" }
+                            )
+                        } else {
+                            anyhow::anyhow!("没有已启用且完成登录同步的账号")
+                        }
+                    })?
             }
-        }
-        .context("没有已启用且完成登录同步的账号")?;
+        };
         request.account_id = Some(account.id);
         let task = Task {
             id: uuid::Uuid::new_v4().to_string(),
@@ -317,14 +370,31 @@ impl App {
         tokio::spawn(async move {
             let result = app.run_task(&id).await;
             if let Err(error) = result {
+                let raw = error.to_string();
+                let mut account_email = None;
+                if let Ok(task) = app.store.task(&id) {
+                    if let Some(account_id) = task.request.account_id.as_deref() {
+                        if let Ok(mut account) = app.store.account(account_id) {
+                            account_email = Some(account.email.clone());
+                            account.last_error = Some(raw.clone());
+                            account.consecutive_failures =
+                                account.consecutive_failures.saturating_add(1);
+                            let _ = app.store.save_account(&account);
+                        }
+                    }
+                }
+                let detailed = match account_email {
+                    Some(email) if !raw.contains(&email) => format!("账号 {email}：{raw}"),
+                    _ => raw,
+                };
                 if let Ok(mut task) = app.store.task(&id) {
+                    task.stage = summarize_failure_stage(&task.stage, &detailed);
                     task.state = "failed".into();
-                    task.stage = "执行失败，请查看详情".into();
-                    task.error = Some(error.to_string());
+                    task.error = Some(detailed.clone());
                     task.updated_at = now();
                     let _ = app.store.save_task(&task);
                 }
-                app.change_status(|s| s.last_error = Some(error.to_string()));
+                app.change_status(|s| s.last_error = Some(detailed));
             }
             let _ = app.refresh();
         });
@@ -390,6 +460,11 @@ impl App {
         )
         .await
         .context("生成超时，Flow 可能仍在执行；请核对上游结果后决定是否重试")??;
+        if account.last_error.is_some() || account.consecutive_failures > 0 {
+            account.last_error = None;
+            account.consecutive_failures = 0;
+            let _ = self.store.save_account(&account);
+        }
         task.results = media;
         task.state = "succeeded".into();
         task.stage = "已完成并保存到本机".into();
@@ -539,7 +614,26 @@ impl App {
                 None,
             )?;
             self.stage(&task.id, "提交视频任务")?;
-            let payload = flow::rpc(session, rpc, argument, Some(&account.project_id)).await?;
+            let payload = match flow::rpc(session, rpc, argument, Some(&account.project_id)).await {
+                Ok(payload) => payload,
+                Err(error) if key.contains("_relaxed") && is_pre_submission_model_error(&error) => {
+                    let fallback_key = key.replace("_relaxed", "");
+                    let captcha = session.captcha("VIDEO_GENERATION").await?;
+                    let (rpc, argument) = flow::video_argument(
+                        &account.project_id,
+                        &task.request.prompt,
+                        &fallback_key,
+                        aspect,
+                        &captcha,
+                        mode,
+                        &references,
+                        task.request.video_id.as_deref(),
+                        None,
+                    )?;
+                    flow::rpc(session, rpc, argument, Some(&account.project_id)).await?
+                }
+                Err(error) => return Err(error),
+            };
             let videos = self
                 .poll_video(session, task, &account.project_id, payload)
                 .await?;
@@ -698,7 +792,74 @@ impl App {
     }
 }
 
-fn account_load(account: &Account, tasks: &[Task]) -> (usize, String) {
+fn is_pre_submission_model_error(error: &anyhow::Error) -> bool {
+    let text = error.to_string();
+    text.contains("Flow RPC 返回错误或缺少数据")
+        || text.contains("PUBLIC_ERROR_MODEL_ACCESS_DENIED")
+        || text.contains("ERROR_MODEL_ACCESS_DENIED")
+        || text.contains("NOT_FOUND")
+        || text.contains("INVALID_ARGUMENT")
+}
+
+pub fn summarize_failure_stage(previous_stage: &str, error_text: &str) -> String {
+    let step = previous_stage.trim();
+    let reason = if error_text.contains("MODEL_ACCESS_DENIED")
+        || error_text.contains("无该模型权限")
+        || error_text.contains("无此模型")
+    {
+        "账号无该模型权限"
+    } else if error_text.contains("UNSAFE_GENERATION") || error_text.contains("安全审核") {
+        "触发安全审核拦截"
+    } else if error_text.contains("PROMINENT_PEOPLE") || error_text.contains("人物保护") {
+        "触发人物保护拦截"
+    } else if error_text.contains("QUOTA_EXCEEDED")
+        || error_text.contains("INSUFFICIENT_CREDITS")
+        || error_text.contains("积分不足")
+        || error_text.contains("RESOURCE_EXHAUSTED")
+    {
+        "账号积分不足或超额"
+    } else if error_text.contains("RATE_LIMIT")
+        || error_text.contains("TOO_MANY_REQUESTS")
+        || error_text.contains("限流")
+    {
+        "请求触发上游限流"
+    } else if error_text.contains("NOT_FOUND") || error_text.contains("缺少数据") {
+        "上游拒绝或不支持该模型"
+    } else if error_text.contains("未连接") || error_text.contains("已断开") {
+        "浏览器连接已断开"
+    } else if error_text.contains("不一致")
+        || error_text.contains("重新登录")
+        || error_text.contains("UNAUTHENTICATED")
+    {
+        "账号需重新登录同步"
+    } else if error_text.contains("验证码") {
+        "获取验证码失败"
+    } else if error_text.contains("超时") {
+        "等待响应超时"
+    } else {
+        "执行失败"
+    };
+    if step.is_empty()
+        || step == "等待执行"
+        || step.starts_with("执行失败")
+        || step.starts_with("失败")
+    {
+        format!("失败：{reason}")
+    } else {
+        format!("失败（{step}）：{reason}")
+    }
+}
+
+fn account_load(
+    account: &Account,
+    tasks: &[Task],
+) -> (
+    usize,
+    std::cmp::Reverse<i32>,
+    u32,
+    String,
+    std::cmp::Reverse<i64>,
+) {
     let assigned = tasks
         .iter()
         .filter(|t| t.request.account_id.as_deref() == Some(&account.id));
@@ -711,7 +872,13 @@ fn account_load(account: &Account, tasks: &[Task]) -> (usize, String) {
         .max()
         .unwrap_or_default()
         .to_owned();
-    (busy, last_used)
+    (
+        busy,
+        std::cmp::Reverse(account.priority),
+        account.consecutive_failures,
+        last_used,
+        std::cmp::Reverse(account.credits.unwrap_or(0)),
+    )
 }
 
 fn encoded_image(value: &Value) -> Option<Vec<u8>> {
@@ -893,20 +1060,18 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn accounts_prefer_free_then_least_recently_used() {
+    fn accounts_prefer_free_then_priority_then_least_recently_used() {
         let account = |id: &str| Account {
             id: id.into(),
             email: format!("{id}@example.test"),
             enabled: true,
-            project_id: String::new(),
             last_synced: Some(now()),
-            credits: None,
-            browser_data_dir: String::new(),
-            browser_profile: String::new(),
-            browser_bridge: false,
+            ..Account::default()
         };
         let first = account("first");
         let second = account("second");
+        let mut high = account("high");
+        high.priority = 100;
         let mut task = Task {
             id: "job".into(),
             request: GenerationRequest {
@@ -923,6 +1088,7 @@ mod tests {
             error: None,
             results: vec![],
         };
+        assert!(account_load(&high, &[task.clone()]) < account_load(&second, &[task.clone()]));
         assert!(account_load(&second, &[task.clone()]) < account_load(&first, &[task.clone()]));
         task.state = "running".into();
         assert_eq!(account_load(&first, &[task.clone()]).0, 1);

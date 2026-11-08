@@ -33,11 +33,16 @@
 .update-notes{max-height:200px;overflow:auto;background:var(--sunken);border:1px solid var(--line);border-radius:6px;padding:12px;font-size:12px;line-height:1.6;color:var(--text-2);white-space:pre-wrap;margin-top:10px}
 
 /* Creation is the default workflow; advanced controls stay in their own views. */
-:root{--field-line:#657d82;font-variant-numeric:tabular-nums}
+:root{--field-line:#657d82;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 input,select,textarea{border-color:var(--field-line)}
 input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
+button:active:not(:disabled){transform:translateY(1px)}
 main{padding-top:24px}
 main>header{margin-bottom:20px}
+#notice{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+#notice .notice-text{flex:1;min-width:0}
+#notice .notice-close{flex-shrink:0;color:inherit;font-size:11px;padding:2px 8px;border:1px solid currentColor;border-radius:4px;opacity:.85}
+#notice .notice-close:hover{opacity:1;background:#ffffff14}
 #summary article{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px 10px;padding:12px 16px}
 #summary strong{display:inline-block;font-size:20px;margin:0}
 #summary article small{flex-basis:100%}
@@ -60,6 +65,13 @@ summary:focus-visible,a:focus-visible{outline:2px solid var(--focus);outline-off
 .draft-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px}
 .draft-row .text-button{padding:6px 0;min-height:28px}
 .task-error{color:var(--danger-text);line-height:1.8;font-size:12px;overflow-wrap:anywhere;margin-top:12px}
+.task-failure-box{margin-top:10px;padding:12px 14px;border-radius:var(--radius);background:var(--error-bg);border:1px solid var(--error-line);color:var(--error-text)}
+.task-failure-title{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.task-failure-title strong{font-size:12px;color:#ffd9ce}
+.task-failure-account{font-size:11px;padding:2px 7px;border-radius:4px;background:#00000038;color:var(--error-text)}
+.task-failure-detail{color:var(--error-text);font-size:12px;line-height:1.65;margin:4px 0}
+.task-failure-advice{color:var(--warn-text);font-size:12px;line-height:1.65;margin:6px 0 0;padding-top:6px;border-top:1px solid #ffffff1a}
+.task-failure-raw{display:block;margin-top:6px;color:#e8b5a6cc;font-size:11px;line-height:1.5;overflow-wrap:anywhere}
 [aria-invalid=true]{border-color:var(--danger-text)}
 .reference-item{display:flex;flex-direction:column;align-items:center;gap:6px}
 #references .reference-item img{width:76px;height:76px}
@@ -73,7 +85,21 @@ summary:focus-visible,a:focus-visible{outline:2px solid var(--focus);outline-off
 .state.cancelled{background:var(--raised);color:var(--text-2)}
 .connect-steps{padding-inline-start:22px;color:var(--text-2);font-size:13px;line-height:2}
 .actions{display:flex;flex-wrap:wrap;gap:8px}
+.account-card{align-items:flex-start}
 .account-card>div{min-width:0;overflow-wrap:anywhere}
+.account-info{flex:1}
+.account-title-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px}
+.tag-priority-high{background:var(--ok-bg);color:var(--ok-text);border-color:var(--notice-line)}
+.tag-priority-low{background:var(--sunken);color:var(--faint);border-color:var(--line)}
+.tag-note{background:var(--active-bg);color:var(--text-2);border-color:var(--active-line)}
+.account-cooldown-note{color:var(--warn-text);font-size:11px;line-height:1.6;margin-top:6px}
+.account-error-box{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;padding:8px 11px;border-radius:6px;background:var(--error-bg);border:1px solid var(--error-line);color:var(--error-text);font-size:11px;line-height:1.5}
+.account-error-box .text-button{color:#ffd9ce;text-decoration:underline;flex-shrink:0}
+.account-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+.account-controls select{width:auto;min-width:140px;padding:6px 10px;font-size:11px;background:var(--sunken)}
+.account-controls button{font-size:11px;padding:6px 10px}
+.cap-toggle{display:inline-flex;align-items:center;gap:6px;margin:0;padding:5px 10px;border:1px solid var(--line);border-radius:var(--radius);background:var(--sunken);font-size:11px;font-weight:500;color:var(--text-2);cursor:pointer;user-select:none}
+.cap-toggle input{width:auto;margin:0;padding:0}
 .account-more[open]>div{position:static;margin-top:8px;box-shadow:none;min-width:0}
 .account-more[open]{flex-basis:100%}
 .profile-dialog,.update-notes{overscroll-behavior:contain}

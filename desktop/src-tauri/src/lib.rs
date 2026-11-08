@@ -108,31 +108,95 @@ async fn save_account(
     email: String,
     id: Option<String>,
     enabled: bool,
+    priority: Option<i32>,
+    note: Option<String>,
+    image_enabled: Option<bool>,
+    video_enabled: Option<bool>,
+    disabled_until: Option<String>,
+    disabled_reason: Option<String>,
+    clear_error: Option<bool>,
+    reset_project: Option<bool>,
 ) -> Result<Account, String> {
-    let _gate = state.core.job_gate.lock().await;
-    if state.core.status().busy() {
-        return Err("请等待任务完成后修改账号".into());
-    }
+    let email = email.trim().to_string();
     let mut account = match id {
         Some(id) => result(&state.core, state.core.store.account(&id))?,
         None => Account {
             id: uuid::Uuid::new_v4().to_string(),
             email: email.clone(),
             enabled,
-            project_id: String::new(),
-            last_synced: None,
-            credits: None,
-            browser_data_dir: String::new(),
-            browser_profile: String::new(),
-            browser_bridge: false,
+            ..Account::default()
         },
     };
     if account.email != email {
+        if state.core.status().busy() {
+            return Err("请等待任务完成后修改账号邮箱".into());
+        }
         account.last_synced = None;
         account.credits = None;
     }
-    account.email = email.trim().into();
+    account.email = email;
     account.enabled = enabled;
+    if let Some(priority) = priority {
+        account.priority = priority.clamp(-1000, 1000);
+    }
+    if let Some(note) = note {
+        account.note = note.trim().chars().take(500).collect();
+    }
+    if let Some(image_enabled) = image_enabled {
+        account.image_enabled = image_enabled;
+    }
+    if let Some(video_enabled) = video_enabled {
+        account.video_enabled = video_enabled;
+    }
+    if let Some(until) = disabled_until {
+        let until = until.trim();
+        account.disabled_until = if until.is_empty() {
+            None
+        } else {
+            Some(until.to_string())
+        };
+    }
+    if let Some(reason) = disabled_reason {
+        let reason = reason.trim();
+        account.disabled_reason = if reason.is_empty() {
+            None
+        } else {
+            Some(reason.chars().take(200).collect())
+        };
+    }
+    if account.disabled_until.is_none() {
+        account.disabled_reason = None;
+    }
+    if clear_error == Some(true) {
+        account.last_error = None;
+        account.consecutive_failures = 0;
+    }
+    if reset_project == Some(true) {
+        account.project_id.clear();
+    }
+    result(&state.core, state.core.store.save_account(&account))?;
+    result(&state.core, state.core.refresh())?;
+    Ok(account)
+}
+#[tauri::command]
+async fn temp_disable_account(
+    state: tauri::State<'_, Desktop>,
+    id: String,
+    minutes: i64,
+    reason: Option<String>,
+) -> Result<Account, String> {
+    let mut account = result(&state.core, state.core.store.account(&id))?;
+    if minutes <= 0 {
+        account.disabled_until = None;
+        account.disabled_reason = None;
+    } else {
+        let clamped = minutes.clamp(1, 60 * 24 * 30);
+        account.disabled_until = Some(after_minutes(clamped));
+        account.disabled_reason = reason
+            .map(|r| r.trim().chars().take(200).collect::<String>())
+            .filter(|r| !r.is_empty())
+            .or_else(|| Some(format!("手动临时禁用 {clamped} 分钟")));
+    }
     result(&state.core, state.core.store.save_account(&account))?;
     result(&state.core, state.core.refresh())?;
     Ok(account)
@@ -811,6 +875,7 @@ pub fn run() {
             models,
             accounts,
             save_account,
+            temp_disable_account,
             delete_account,
             configure_account_browser,
             browser_profiles,

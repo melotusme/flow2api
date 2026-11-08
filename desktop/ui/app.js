@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.3.3';
+const APP_VERSION='0.3.4';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -9,13 +9,17 @@ const titles = {studio:'创作工作台',tasks:'任务与进度',library:'本机
 let noticeTimer;
 
 function notice(message,error=false){
-  $('notice').textContent=String(message);
-  $('notice').className=error?'error':'';
-  $('notice').setAttribute('role',error?'alert':'status');
-  $('notice').setAttribute('aria-live',error?'assertive':'polite');
-  $('notice').hidden=false;
+  const box=$('notice');
+  box.replaceChildren(
+    node('span',String(message),'notice-text'),
+    button('关闭',()=>{box.hidden=true;clearTimeout(noticeTimer);},'text-button notice-close')
+  );
+  box.className=error?'error':'';
+  box.setAttribute('role',error?'alert':'status');
+  box.setAttribute('aria-live',error?'assertive':'polite');
+  box.hidden=false;
   clearTimeout(noticeTimer);
-  if(!error)noticeTimer=setTimeout(()=>$('notice').hidden=true,6500);
+  if(!error)noticeTimer=setTimeout(()=>box.hidden=true,6500);
 }
 function node(tag,text,className){
   const element=document.createElement(tag);
@@ -289,7 +293,7 @@ function renderModels(){
 }
 for(const id of Object.values(pickerIds))$(id).onchange=()=>{
   const wanted=Object.fromEntries(Object.entries(pickerIds).map(([field,key])=>[field,$(key).value]));
-  applyPicker(wanted);saveDraft();clearComposeError();
+  applyPicker(wanted);renderAccounts();saveDraft();clearComposeError();
 };
 
 function studioRequest(){
@@ -308,12 +312,29 @@ function showComposeError(error){
 }
 function updateReadiness(){
   const running=state.status?.service==='running';
-  const ready=state.accounts.filter(accountReady);
+  const currentKind=selectedModel()?.capabilities?.type||$('model-type')?.value||'image';
+  const ready=state.accounts.filter(a=>accountReady(a,currentKind));
+  const anyReady=state.accounts.filter(a=>accountReady(a));
   const chosen=$('account').value;
-  let title='可以开始创作',detail=ready.length===1?`使用 ${ready[0].email}，作品自动保存到本机。`:`${ready.length} 个账号就绪，自动选择空闲账号。`,actionText='';
+  const chosenAccount=state.accounts.find(a=>a.id===chosen);
+  let title='可以开始创作',detail=ready.length===1?`使用 ${ready[0].email}，作品自动保存到本机。`:`${ready.length} 个账号就绪，按优先级自动选择空闲账号。`,actionText='';
   if(!running){title=state.status?.service==='failed'?'本机 API 启动失败':'本机 API 尚未启动';detail=state.status?.last_error||'启动后即可连接浏览器并创作。';actionText='启动 API';}
-  else if(!ready.length){title='先连接 Flow 账号';detail='在 Google 账号页完成连接，保留 Flow 标签页打开后即可创作。';actionText='连接账号';}
-  else if(chosen&&!ready.some(a=>a.id===chosen)){title='所选账号暂不可用';detail='重新连接该账号，或切换为自动选择就绪账号。';actionText='检查账号';}
+  else if(!anyReady.length){
+    const tempCount=state.accounts.filter(a=>a.enabled&&isTempDisabled(a)).length;
+    title=tempCount?'账号正在临时禁用冷却中':'先连接 Flow 账号';
+    detail=tempCount?`有 ${tempCount} 个账号处于临时禁用状态，可在 Google 账号页解除或等待恢复。`:'在 Google 账号页完成连接，保留 Flow 标签页打开后即可创作。';
+    actionText='管理账号';
+  }
+  else if(!ready.length){
+    title=`没有开启${currentKind==='video'?'视频':'图片'}生成的就绪账号`;
+    detail=`当前已连接的账号关闭了${currentKind==='video'?'视频':'图片'}生成开关，请在 Google 账号页开启或切换创作类型。`;
+    actionText='调整账号开关';
+  }
+  else if(chosen&&!ready.some(a=>a.id===chosen)){
+    title='所选账号暂不可用';
+    detail=chosenAccount&&isTempDisabled(chosenAccount)?`所选账号正在临时禁用中（${remainingCooldown(chosenAccount)}），请解除禁用或切换为自动分配。`:chosenAccount&&!accountSupportsKind(chosenAccount,currentKind)?`所选账号已关闭${currentKind==='video'?'视频':'图片'}生成开关，请开启或切换账号。`:'请重新连接该账号，或切换为自动选择就绪账号。';
+    actionText='检查账号';
+  }
   if(state.loadingImages){title='正在读取参考图';detail='图片准备好后即可提交。';}
   $('readiness-title').textContent=title;$('readiness-detail').textContent=detail;
   $('readiness').classList.toggle('ready',running&&ready.length>0&&(!chosen||ready.some(a=>a.id===chosen)));
@@ -407,16 +428,105 @@ function expandablePrompt(text){
   return details;
 }
 
+function explainErrorText(raw){
+  const text=String(raw||'').trim();
+  if(!text)return null;
+  if(text.includes('PUBLIC_ERROR_MODEL_ACCESS_DENIED')||text.includes('ERROR_MODEL_ACCESS_DENIED')||text.includes('无该模型权限')){
+    return {
+      stageText:'失败：当前账号无该模型权限',
+      title:'当前 Google 账号无该模型权限（PUBLIC_ERROR_MODEL_ACCESS_DENIED）',
+      detail:'该账号的 Google 订阅等级不支持当前模型（例如 Veo 3.1 高清／专业版视频通常需要 Google AI Ultra 高阶订阅，普通 Pro 账号调用会被拒绝）。',
+      advice:'处理建议：① 在「Google 账号」页将 AI Ultra 账号设为「首选主力」优先级；② 将普通账号取消勾选「允许生视频」（仅用于生图）；③ 或将模型切换为 Fast 规格重试。',
+    };
+  }
+  if(text.includes('PUBLIC_ERROR_UNSAFE_GENERATION')||text.includes('PUBLIC_ERROR_SAFETY_FILTER')||text.includes('安全审核')){
+    return {
+      stageText:'失败：提示词或参考图触发安全审核拦截',
+      title:'触发内容安全审核拦截（PUBLIC_ERROR_UNSAFE_GENERATION）',
+      detail:'Google Flow 安全策略拦截了本次提交的描述词或参考图内容。',
+      advice:'处理建议：调整提示词中的敏感或激烈措辞，或更换参考图后重试。',
+    };
+  }
+  if(text.includes('PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED')||text.includes('PUBLIC_ERROR_PERSON_GENERATION')||text.includes('人物保护')){
+    return {
+      stageText:'失败：参考图或提示词触发人物保护策略',
+      title:'触发特定人物／名人保护拦截（PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED）',
+      detail:'参考图或提示词被识别为包含特定公众人物面部特征，被上游拦截。',
+      advice:'处理建议：请更换不包含公众人物肖像的参考图，或修改人物描述。',
+    };
+  }
+  if(text.includes('PUBLIC_ERROR_QUOTA_EXCEEDED')||text.includes('PUBLIC_ERROR_INSUFFICIENT_CREDITS')||text.includes('RESOURCE_EXHAUSTED')||text.includes('积分不足')){
+    return {
+      stageText:'失败：当前账号 AI 积分不足或配额耗尽',
+      title:'账号 AI Credits 积分不足或达到配额上限',
+      detail:'当前执行的 Google 账号剩余积分不足以支付本次生成，或已达到周期配额限制。',
+      advice:'处理建议：在账号页点击「同步登录」核对最新余额，将该账号「临时禁用」或切换其他积分充足的账号重试。',
+    };
+  }
+  if(text.includes('PUBLIC_ERROR_RATE_LIMIT_EXCEEDED')||text.includes('PUBLIC_ERROR_TOO_MANY_REQUESTS')||text.includes('触发上游限流')){
+    return {
+      stageText:'失败：请求过于频繁触发上游限流',
+      title:'请求频率过高触发 Flow 限流',
+      detail:'当前账号短时间内提交了过多请求，被 Google Flow 暂时限流。',
+      advice:'处理建议：点击下方「临时禁用该号 1 小时」让账号冷却，或切换其他账号执行。',
+    };
+  }
+  if(text.includes('Flow RPC 返回错误或缺少数据')||text.includes('NOT_FOUND')){
+    return {
+      stageText:'失败：上游拒绝或账号不支持该模型通道',
+      title:'Flow 接口返回空数据或不支持当前模型键',
+      detail:'Google Flow 未返回生成任务数据。常见原因：当前账号不支持 Relaxed 慢速通道、账号无该模型权限，或当前 Flow 项目会话已失效。',
+      advice:'处理建议：应用已支持自动回退标准模型通道；可点击「换其他账号重试」或将主力高额度账号设为高优先级。',
+    };
+  }
+  if(text.includes('Flow 浏览器操作失败')||text.includes('标签页已断开')||text.includes('未连接')){
+    return {
+      stageText:'失败：浏览器 Flow 标签页通信或网络异常',
+      title:'浏览器 Flow 标签页执行请求失败',
+      detail:'通过浏览器标签页调用 Flow 接口时失败（可能是网络／代理波动、Flow 页面未保持打开、登录过期或油猴脚本未更新）。',
+      advice:'处理建议：确认浏览器中 Flow 页面保持打开且网络正常，在「Google 账号」页点击「同步登录」后再试。',
+    };
+  }
+  if(text.includes('验证码')){
+    return {
+      stageText:'失败：获取 Google reCAPTCHA 验证码失败',
+      title:'未能从浏览器获取 Flow 验证码',
+      detail:'Flow 页面中的 reCAPTCHA Enterprise 校验未就绪或执行超时。',
+      advice:'处理建议：刷新浏览器中的 Flow 页面，并确保已安装最新版本的连接脚本（v2.1.0+）。',
+    };
+  }
+  return {
+    stageText:text.length<=42?`失败：${text}`:'执行失败，请查看下方原因诊断',
+    title:'任务未完成',
+    detail:text,
+    advice:'处理建议：请根据上方原因检查账号状态、网络连接或切换其他账号重试。',
+  };
+}
+
 function taskCard(task){
   const card=node('article',undefined,'task-card');
   const header=node('header');
+  const acct=state.accounts.find(a=>a.id===task.request?.account_id);
+  const acctLabel=acct?` · ${acct.email}${acct.note?` (${acct.note})`:''}`:'';
   header.append(
     node('span',labels[task.state]||task.state,'state '+task.state),
-    node('small',`${task.request.model} · ${new Date(task.created_at).toLocaleString()}`)
+    node('small',`${task.request.model}${acctLabel} · ${new Date(task.created_at).toLocaleString()}`)
   );
-  card.append(header,expandablePrompt(task.request.prompt),node('div',task.stage,'task-stage'));
+  const explained=task.error?explainErrorText(task.error):null;
+  const stageText=(task.stage==='执行失败，请查看详情'&&explained)?explained.stageText:task.stage;
+  card.append(header,expandablePrompt(task.request.prompt),node('div',stageText,'task-stage'));
   if(task.state==='running')card.append(node('small','执行中任务无法撤回；超时或失败后请先核对 Flow 结果，再决定是否重新提交。'));
-  if(task.error)card.append(node('p',task.error,'task-error'));
+  if(task.error&&explained){
+    const box=node('div',undefined,'task-failure-box');
+    const titleRow=node('div',undefined,'task-failure-title');
+    titleRow.append(node('strong',explained.title));
+    if(acct)titleRow.append(node('span',`执行账号：${acct.email}`,'task-failure-account'));
+    box.append(titleRow,node('p',explained.detail,'task-failure-detail'),node('p',explained.advice,'task-failure-advice'));
+    if(explained.detail!==task.error){
+      box.append(node('small',`原始回执：${task.error}`,'task-failure-raw'));
+    }
+    card.append(box);
+  }
   const actions=node('div',undefined,'task-actions');
   for(const media of task.results||[]){
     actions.append(button(media.kind==='image'?'打开图片 ↗':'打开视频 ↗',()=>invoke('open_media',{filename:media.filename})));
@@ -426,6 +536,23 @@ function taskCard(task){
   }
   if(task.request.prompt){
     actions.append(button(['failed','interrupted','cancelled'].includes(task.state)?'再次编辑后重试':'再次编辑',()=>editTask(task)));
+  }
+  if(task.state==='failed'&&acct){
+    const otherReady=state.accounts.filter(a=>a.id!==acct.id&&accountReady(a)).sort((a,b)=>(b.priority||0)-(a.priority||0)||(b.credits||0)-(a.credits||0));
+    if(otherReady.length){
+      actions.append(button(`换 ${otherReady[0].email.split('@')[0]} 重试 ↗`,async()=>{
+        const full=await invoke('task_detail',{id:task.id});
+        await fillStudioFromRecord(full.request.prompt,full.request.model,full.request.video_id,{...full.request,account_id:otherReady[0].id});
+        notice(`已切换为账号 ${otherReady[0].email}，可直接点击「开始创作」重试。`);
+      },'primary'));
+    }
+    if(!isTempDisabled(acct)){
+      actions.append(button('临时禁用该号 1h',async()=>{
+        await invoke('temp_disable_account',{id:acct.id,minutes:60,reason:explained?.title||'任务执行失败手动冷却'});
+        await refresh();
+        notice(`已将 ${acct.email} 临时禁用 1 小时，期间自动分配将跳过该账号。`);
+      }));
+    }
   }
   if(task.state==='queued')actions.prepend(button('取消排队',async()=>{await invoke('cancel_task',{id:task.id});await refresh();notice('已取消排队，未提交到 Flow。');}));
   if(actions.children.length)card.append(actions);
@@ -448,7 +575,11 @@ const tasksView=createListView({
     {value:'archived',label:'旧版已完成'},
   ],
   matchFilter:(task,filter)=>task.state===filter,
-  searchText:task=>[task.id,task.request?.prompt,task.request?.model,task.stage,task.error,labels[task.state]].filter(Boolean).join(' '),
+  searchText:task=>{
+    const acct=state.accounts.find(a=>a.id===task.request?.account_id);
+    const explained=task.error?explainErrorText(task.error):null;
+    return [task.id,task.request?.prompt,task.request?.model,acct?.email,acct?.note,task.stage,task.error,explained?.title,explained?.detail,labels[task.state]].filter(Boolean).join(' ');
+  },
   sorts:[
     {value:'created_at',label:'创建时间',get:t=>t.created_at||''},
     {value:'updated_at',label:'更新时间',get:t=>t.updated_at||''},
@@ -506,28 +637,190 @@ async function chooseAccountProfile(account){
     const profile=prompt('填写资料子目录名称，例如 Default 或 Profile 1','Default');if(!profile)return;
     if(await bindAccountProfile(account,dataDir,profile))dialog.close();
   }));
+  const previousFocus=document.activeElement;
   dialog.append(list,controls);
-  dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+  dialog.addEventListener('close',()=>{dialog.remove();previousFocus?.focus?.();},{once:true});
   document.body.append(dialog);
   dialog.showModal();
 }
 
-function accountReady(a){
-  return a.enabled&&Boolean(a.last_synced)&&(!a.browser_bridge||state.connections.some(c=>c.account_id===a.id&&c.connected&&c.state==='ready'));
+function isTempDisabled(a){
+  if(!a?.disabled_until)return false;
+  const until=new Date(a.disabled_until).getTime();
+  return Number.isFinite(until)&&until>Date.now();
+}
+
+function remainingCooldown(a){
+  if(!isTempDisabled(a))return '';
+  const mins=Math.max(1,Math.ceil((new Date(a.disabled_until).getTime()-Date.now())/60000));
+  if(mins>=60){
+    const hours=(mins/60).toFixed(mins%60===0?0:1);
+    return `剩余约 ${hours} 小时`;
+  }
+  return `剩余 ${mins} 分钟`;
+}
+
+function accountSupportsKind(a,kind){
+  if(kind==='video')return a.video_enabled!==false;
+  if(kind==='image')return a.image_enabled!==false;
+  return a.image_enabled!==false||a.video_enabled!==false;
+}
+
+function accountReady(a,kind=null){
+  return a.enabled&&!isTempDisabled(a)&&accountSupportsKind(a,kind)&&Boolean(a.last_synced)&&(!a.browser_bridge||state.connections.some(c=>c.account_id===a.id&&c.connected&&c.state==='ready'));
+}
+
+const PRIORITY_OPTIONS=[
+  {value:100,label:'首选主力 (100)',short:'首选主力'},
+  {value:50,label:'高优先 (50)',short:'高优先'},
+  {value:0,label:'普通 (0)',short:'普通'},
+  {value:-20,label:'低优先 (-20)',short:'低优先'},
+  {value:-50,label:'仅作备用 (-50)',short:'备用'},
+];
+
+function priorityBadgeText(p){
+  const val=Number(p||0);
+  const found=PRIORITY_OPTIONS.find(o=>o.value===val);
+  if(found)return found.short;
+  return val>0?`优先 +${val}`:`优先 ${val}`;
 }
 
 function accountCard(account){
   const row=node('article',undefined,'account-card');
-  const info=node('div');
+  const info=node('div',undefined,'account-info');
   const connection=state.connections.find(c=>c.account_id===account.id);
   const online=!account.browser_bridge||Boolean(connection?.connected&&connection.state==='ready');
-  info.append(
-    node('strong',account.email),
-    node('p',`${account.enabled?'已启用':'已停用'} · ${account.last_synced&&online?'同步于 '+new Date(account.last_synced).toLocaleString():'待登录同步'}${account.credits===null?'':' · '+account.credits+' credits'}`)
+  const tempDisabled=isTempDisabled(account);
+  const ready=accountReady(account);
+
+  const titleRow=node('div',undefined,'account-title-row');
+  titleRow.append(node('strong',account.email));
+  const statusBadge=node(
+    'span',
+    !account.enabled?'已停用':tempDisabled?`临时禁用 · ${remainingCooldown(account)}`:ready?'已就绪':'待登录同步',
+    'state '+(!account.enabled?'cancelled':tempDisabled?'running':ready?'succeeded':'failed')
   );
+  titleRow.append(statusBadge);
+  const prio=Number(account.priority||0);
+  if(prio!==0){
+    titleRow.append(node('span',priorityBadgeText(prio),'tag '+(prio>0?'tag-priority-high':'tag-priority-low')));
+  }
+  if(account.credits!==null&&account.credits!==undefined){
+    const tier=account.credits>=5000?' · 高额度':'';
+    titleRow.append(node('span',`${Number(account.credits).toLocaleString()} credits${tier}`,'tag'));
+  }
+  if(account.note){
+    titleRow.append(node('span',account.note,'tag tag-note'));
+  }
+  info.append(titleRow);
+
+  const acctTasks=state.tasks.filter(t=>t.request?.account_id===account.id);
+  const okCount=acctTasks.filter(t=>t.state==='succeeded').length;
+  const failCount=acctTasks.filter(t=>t.state==='failed').length;
+  const runningCount=acctTasks.filter(t=>['running','queued'].includes(t.state)).length;
+  const statsParts=[];
+  if(runningCount)statsParts.push(`${runningCount} 执行中`);
+  if(okCount||failCount)statsParts.push(`成功 ${okCount} · 失败 ${failCount}`);
+
+  const metaLine=node('p',`${account.last_synced&&online?'同步于 '+new Date(account.last_synced).toLocaleString():'尚未完成登录同步'}${statsParts.length?' · '+statsParts.join(' / '):''}`);
+  info.append(metaLine);
+
+  if(tempDisabled&&account.disabled_reason){
+    info.append(node('div',`冷却原因：${account.disabled_reason}（至 ${new Date(account.disabled_until).toLocaleTimeString()} 自动恢复）`,'account-cooldown-note'));
+  }
+
   const binding=node('div',undefined,'hint');
-  binding.textContent=account.browser_bridge?(connection?.connected?connection.message:'默认浏览器连接已断开，请打开 Flow 标签页；若未自动恢复，请重新获取连接码'):account.browser_data_dir?`已有资料：${account.browser_data_dir} · ${account.browser_profile}`:'独立登录：应用自动创建并保留资料';
+  binding.textContent=account.browser_bridge?(connection?.connected?connection.message:'默认浏览器连接已断开，请打开 Flow 标签页；本机已支持免连接码自动重连'):account.browser_data_dir?`已有资料：${account.browser_data_dir} · ${account.browser_profile}`:'独立登录：应用自动创建并保留资料';
   info.append(binding);
+
+  if(account.last_error){
+    const errInfo=explainErrorText(account.last_error);
+    const errBox=node('div',undefined,'account-error-box');
+    const errText=node('span',`最近报错${account.consecutive_failures>1?`（连续 ${account.consecutive_failures} 次）`:''}：${errInfo?errInfo.title:account.last_error}`);
+    const clearBtn=button('清除报错',async()=>{
+      await invoke('save_account',{id:account.id,email:account.email,enabled:account.enabled,clearError:true});
+      await refresh();
+      notice('已清除该账号的错误记录。');
+    },'text-button');
+    errBox.append(errText,clearBtn);
+    info.append(errBox);
+  }
+
+  const controls=node('div',undefined,'account-controls');
+  const prioSelect=node('select');
+  prioSelect.setAttribute('aria-label',`${account.email} 优先级`);
+  const currentPrio=Number(account.priority||0);
+  const options=PRIORITY_OPTIONS.some(o=>o.value===currentPrio)?PRIORITY_OPTIONS:[{value:currentPrio,label:`自定义 (${currentPrio})`,short:`${currentPrio}`},...PRIORITY_OPTIONS];
+  for(const item of options){
+    const opt=node('option',`优先级：${item.label}`);
+    opt.value=String(item.value);
+    opt.selected=item.value===currentPrio;
+    prioSelect.append(opt);
+  }
+  prioSelect.onchange=()=>action(prioSelect,async()=>{
+    await invoke('save_account',{id:account.id,email:account.email,enabled:account.enabled,priority:Number(prioSelect.value)});
+    await refresh();
+    notice(`已将 ${account.email} 优先级设为 ${prioSelect.selectedOptions[0].textContent.replace('优先级：','')}。`);
+  });
+  controls.append(prioSelect);
+
+  const imgToggle=node('label',undefined,'cap-toggle');
+  const imgCheck=node('input');
+  imgCheck.type='checkbox';
+  imgCheck.checked=account.image_enabled!==false;
+  imgCheck.onchange=()=>action(imgCheck,async()=>{
+    await invoke('save_account',{id:account.id,email:account.email,enabled:account.enabled,imageEnabled:imgCheck.checked});
+    await refresh();
+    notice(`${account.email} ${imgCheck.checked?'已开启':'已关闭'}图片生成。`);
+  });
+  imgToggle.append(imgCheck,node('span','允许生图'));
+
+  const vidToggle=node('label',undefined,'cap-toggle');
+  const vidCheck=node('input');
+  vidCheck.type='checkbox';
+  vidCheck.checked=account.video_enabled!==false;
+  vidCheck.onchange=()=>action(vidCheck,async()=>{
+    await invoke('save_account',{id:account.id,email:account.email,enabled:account.enabled,videoEnabled:vidCheck.checked});
+    await refresh();
+    notice(`${account.email} ${vidCheck.checked?'已开启':'已关闭'}视频生成。`);
+  });
+  vidToggle.append(vidCheck,node('span','允许生视频'));
+  controls.append(imgToggle,vidToggle);
+
+  if(tempDisabled){
+    controls.append(button('解除临时禁用',async()=>{
+      await invoke('temp_disable_account',{id:account.id,minutes:0,reason:null});
+      await refresh();
+      notice(`已解除 ${account.email} 的临时禁用。`);
+    },'primary'));
+  }else{
+    const cooldownSelect=node('select');
+    cooldownSelect.setAttribute('aria-label',`${account.email} 临时禁用时长`);
+    for(const [val,label] of [['','临时禁用冷却…'],['15','暂停 15 分钟'],['60','暂停 1 小时'],['360','暂停 6 小时'],['1440','暂停 24 小时']]){
+      const opt=node('option',label);
+      opt.value=val;
+      cooldownSelect.append(opt);
+    }
+    cooldownSelect.onchange=()=>action(cooldownSelect,async()=>{
+      const mins=Number(cooldownSelect.value);
+      cooldownSelect.value='';
+      if(!mins)return;
+      await invoke('temp_disable_account',{id:account.id,minutes:mins,reason:null});
+      await refresh();
+      notice(`已将 ${account.email} 临时禁用 ${mins>=60?(mins/60)+' 小时':mins+' 分钟'}。`);
+    });
+    controls.append(cooldownSelect);
+  }
+
+  controls.append(button(account.note?'修改备注':'添加备注',async()=>{
+    const next=prompt(`为 ${account.email} 设置备注（如 AI Ultra 主力、仅生图等，留空清除）：`,account.note||'');
+    if(next===null)return;
+    await invoke('save_account',{id:account.id,email:account.email,enabled:account.enabled,note:next});
+    await refresh();
+    notice(next.trim()?'账号备注已保存。':'账号备注已清除。');
+  }));
+  info.append(controls);
+
   const actions=node('div',undefined,'actions');
   actions.append(
     button(account.browser_bridge?'打开 Flow 页面':'打开登录窗口',async()=>{
@@ -540,7 +833,7 @@ function accountCard(account){
       await refresh();
       notice('登录账号与余额已同步。');
     }),
-    button(account.enabled?'停用':'启用',async()=>{
+    button(account.enabled?'停用账号':'启用账号',async()=>{
       await invoke('save_account',{id:account.id,email:account.email,enabled:!account.enabled});
       await refresh();
     }),
@@ -549,6 +842,11 @@ function accountCard(account){
       await invoke('configure_account_browser',{id:account.id,dataDir:'',profile:''});
       await refresh();
       notice('已切换独立资料，请打开登录窗口完成登录。');
+    })]:[]),
+    ...(account.project_id?[button('重置 Flow 项目',async()=>{
+      await invoke('save_account',{id:account.id,email:account.email,enabled:account.enabled,resetProject:true});
+      await refresh();
+      notice('已清空旧项目 ID，下次生成将自动创建新 Flow 项目。');
     })]:[]),
     button('删除账号',async()=>{
       if(!confirm('删除该账号的应用登记？浏览器资料会保留在本机。'))return;
@@ -566,41 +864,53 @@ function accountCard(account){
 const accountsView=createListView({
   key:'accounts',
   hostId:'account-list',
-  searchPlaceholder:'搜索账号邮箱、资料目录或项目 ID…',
+  searchPlaceholder:'搜索账号邮箱、备注、报错原因或项目 ID…',
   filterLabel:'账号状态',
   filters:[
     {value:'all',label:'全部账号'},
     {value:'ready',label:'已就绪（已同步）'},
+    {value:'temp_disabled',label:'临时禁用冷却中'},
     {value:'unsynced',label:'待登录同步'},
     {value:'disabled',label:'已停用'},
   ],
   matchFilter:(a,filter)=>{
     if(filter==='ready')return accountReady(a);
-    if(filter==='unsynced')return a.enabled&&!accountReady(a);
+    if(filter==='temp_disabled')return a.enabled&&isTempDisabled(a);
+    if(filter==='unsynced')return a.enabled&&!isTempDisabled(a)&&!accountReady(a);
     if(filter==='disabled')return !a.enabled;
     return true;
   },
-  searchText:a=>[a.email,a.project_id,a.browser_data_dir,a.browser_profile].filter(Boolean).join(' '),
+  searchText:a=>[a.email,a.note,a.last_error,a.disabled_reason,a.project_id,a.browser_data_dir,a.browser_profile].filter(Boolean).join(' '),
   sorts:[
-    {value:'email',label:'邮箱',get:a=>a.email||''},
+    {value:'priority',label:'优先级',get:a=>Number(a.priority||0)},
+    {value:'credits',label:'积分余额',get:a=>a.credits??-1},
     {value:'last_synced',label:'同步时间',get:a=>a.last_synced||''},
-    {value:'credits',label:'余额',get:a=>a.credits??-1},
+    {value:'email',label:'邮箱',get:a=>a.email||''},
   ],
-  defaultOrder:'asc',
-  emptyText:'打开 Flow 页面，获取连接码并在页面连接当前账号。',
+  defaultOrder:'desc',
+  emptyText:'打开 Flow 页面并登录，右下角将自动免码直连当前账号。',
   noMatchText:'没有匹配当前筛选条件的 Google 账号。',
-  revisionKey:items=>[items,state.connections],
+  revisionKey:items=>[items,state.connections,state.tasks.length],
   renderItem:accountCard,
 });
 
 function renderAccounts(){
   const select=$('account');
   const previous=select.value||draft.account_id||'';
-  const signature=JSON.stringify(state.accounts.map(a=>[a.id,a.email,accountReady(a)]));
+  const currentKind=selectedModel()?.capabilities?.type||$('model-type')?.value||'image';
+  const signature=JSON.stringify(state.accounts.map(a=>[a.id,a.email,a.priority,a.credits,a.note,accountReady(a,currentKind),isTempDisabled(a)]));
   if(select.dataset.signature!==signature){
     select.dataset.signature=signature;
-    const automatic=node('option','自动选择就绪账号');automatic.value='';
-    select.replaceChildren(automatic,...state.accounts.map(account=>{const option=node('option',account.email+(accountReady(account)?'':' · 未就绪'));option.value=account.id;return option;}));
+    const automatic=node('option','自动分配（按优先级与空闲状态）');automatic.value='';
+    const sorted=[...state.accounts].sort((a,b)=>(b.priority||0)-(a.priority||0)||(b.credits||0)-(a.credits||0));
+    select.replaceChildren(automatic,...sorted.map(account=>{
+      const statusSuffix=accountReady(account,currentKind)?'':isTempDisabled(account)?' · 临时禁用中':!account.enabled?' · 已停用':!accountSupportsKind(account,currentKind)?` · 已关${currentKind==='video'?'视频':'生图'}`:' · 未就绪';
+      const creditText=account.credits!=null?` (${Number(account.credits).toLocaleString()} credits)`:'';
+      const prioText=account.priority?` [${priorityBadgeText(account.priority)}]`:'';
+      const option=node('option',`${account.email}${prioText}${creditText}${statusSuffix}`);
+      option.value=account.id;
+      return option;
+    }));
     select.value=state.accounts.some(a=>a.id===previous)?previous:'';
   }
   accountsView.update(state.accounts);updateReadiness();
@@ -751,8 +1061,29 @@ $('quick-login').onclick=()=>action($('quick-login'),async()=>{
 $('open-flow').onclick=()=>action($('open-flow'),()=>invoke('open_flow_page'));
 $('pair-browser').onclick=()=>action($('pair-browser'),async()=>{
   const code=await invoke('browser_pairing_code');
-  $('pairing-code').textContent=`连接码：${code} · 5 分钟有效，复制到 Flow 页面右下角。`;
+  $('pairing-code').textContent=`备用连接码：${code}（5 分钟有效；本机 localhost 直连无需填写连接码，仅在手动校验时使用）。`;
   await copy(code);
+});
+if($('sync-all-accounts'))$('sync-all-accounts').onclick=()=>action($('sync-all-accounts'),async()=>{
+  const targets=state.accounts.filter(a=>a.enabled);
+  if(!targets.length)throw Error('没有已启用的 Google 账号');
+  let ok=0,failed=[];
+  for(let i=0;i<targets.length;i++){
+    const a=targets[i];
+    notice(`正在同步账号 (${i+1}/${targets.length})：${a.email}…`);
+    try{
+      await invoke('sync_account',{id:a.id});
+      ok++;
+    }catch(err){
+      failed.push(`${a.email}（${err?.message||err}）`);
+    }
+  }
+  await refresh();
+  if(failed.length){
+    notice(`同步完成：成功 ${ok} 个，失败 ${failed.length} 个：${failed.join('；')}`,true);
+  }else{
+    notice(`全部 ${ok} 个启用账号已同步最新登录状态与积分余额。`);
+  }
 });
 $('open-userscript').onclick=()=>action($('open-userscript'),async()=>{
   await invoke('open_userscript_url');
@@ -906,6 +1237,7 @@ function renderUpdateStatus(status){
 let pendingUpdate=null;
 
 function showUpdateDialog(autoCheck=false){
+  const previousFocus=document.activeElement;
   let dialog=document.getElementById('update-dialog');
   if(!dialog){
     dialog=node('dialog',undefined,'profile-dialog update-dialog');
@@ -939,7 +1271,7 @@ function showUpdateDialog(autoCheck=false){
     actions.append(checkBtn,installBtn,cancelBtn);
 
     dialog.append(header,body,actions);
-    dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+    dialog.addEventListener('close',()=>{dialog.remove();previousFocus?.focus?.();},{once:true});
     document.body.append(dialog);
   }
   dialog.showModal();

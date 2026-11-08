@@ -5,6 +5,10 @@ pub fn now() -> String {
     Utc::now().to_rfc3339()
 }
 
+pub fn after_minutes(minutes: i64) -> String {
+    (Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339()
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -33,12 +37,20 @@ impl Default for Settings {
     }
 }
 
+pub fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug)]
 pub struct SyncedAccount {
     pub id: String,
     pub email: String,
     pub enabled: bool,
     pub project_id: String,
+    pub priority: i32,
+    pub note: String,
+    pub image_enabled: bool,
+    pub video_enabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,6 +67,67 @@ pub struct Account {
     pub browser_profile: String,
     #[serde(default)]
     pub browser_bridge: bool,
+    #[serde(default)]
+    pub priority: i32,
+    #[serde(default)]
+    pub disabled_until: Option<String>,
+    #[serde(default)]
+    pub disabled_reason: Option<String>,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default = "default_true")]
+    pub image_enabled: bool,
+    #[serde(default = "default_true")]
+    pub video_enabled: bool,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub consecutive_failures: u32,
+}
+
+impl Default for Account {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            email: String::new(),
+            enabled: true,
+            project_id: String::new(),
+            last_synced: None,
+            credits: None,
+            browser_data_dir: String::new(),
+            browser_profile: String::new(),
+            browser_bridge: false,
+            priority: 0,
+            disabled_until: None,
+            disabled_reason: None,
+            note: String::new(),
+            image_enabled: true,
+            video_enabled: true,
+            last_error: None,
+            consecutive_failures: 0,
+        }
+    }
+}
+
+impl Account {
+    pub fn temporarily_disabled_at(&self, now_rfc3339: &str) -> bool {
+        self.disabled_until
+            .as_deref()
+            .is_some_and(|until| !until.is_empty() && until > now_rfc3339)
+    }
+    pub fn temporarily_disabled(&self) -> bool {
+        self.temporarily_disabled_at(&now())
+    }
+    pub fn available(&self) -> bool {
+        self.enabled && !self.temporarily_disabled()
+    }
+    pub fn supports_kind(&self, is_video: bool) -> bool {
+        if is_video {
+            self.video_enabled
+        } else {
+            self.image_enabled
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -43,7 +43,8 @@ impl VideoBatch {
             // Only a response without operation records can use a global direct URL.
             if flow::video_records(payload, None).is_empty() {
                 if let Some(code) = flow::error_code(payload) {
-                    bail!("Flow 视频生成失败：{code}");
+                    let (summary, advice) = flow::explain_error_code(&code);
+                    bail!("Flow 视频生成失败：{summary}（{code}）。{advice}");
                 }
                 batch.direct = flow::media_url(payload, "video").map(|url| VideoResult {
                     url,
@@ -79,7 +80,8 @@ impl VideoBatch {
         let records = flow::video_records(payload, None);
         if records.is_empty() {
             if let Some(code) = flow::error_code(payload) {
-                bail!("Flow 视频生成失败：{code}");
+                let (summary, advice) = flow::explain_error_code(&code);
+                bail!("Flow 视频生成失败：{summary}（{code}）。{advice}");
             }
             if let Some(op) = queried.and_then(|id| {
                 self.operations
@@ -111,7 +113,8 @@ impl VideoBatch {
             };
             op.media_id = record[2].as_str().unwrap().into();
             if let Some(code) = flow::error_code(record) {
-                bail!("Flow 视频生成失败：{code}");
+                let (summary, advice) = flow::explain_error_code(&code);
+                bail!("Flow 视频生成失败：{summary}（{code}）。{advice}");
             }
             if let Some(url) = flow::media_url(record, "video") {
                 op.result = Some(VideoResult {

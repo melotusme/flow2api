@@ -715,6 +715,7 @@ mod tests {
             browser_data_dir: String::new(),
             browser_profile: String::new(),
             browser_bridge: false,
+            ..crate::model::Account::default()
         };
         app.store.save_account(&account)?;
         app.refresh()?;

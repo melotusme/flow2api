@@ -114,9 +114,18 @@ impl Peer {
         if let Some(result) = result {
             if let Some(sender) = self.pending.lock().unwrap().remove(&result.id) {
                 let value = match result.error {
-                    Some(_) => Err(anyhow::anyhow!(
-                        "Flow 浏览器操作失败，请检查页面登录、网络或重新连接"
-                    )),
+                    Some(detail) => {
+                        let detail = detail.trim();
+                        if detail.is_empty() || detail == "failed" {
+                            Err(anyhow::anyhow!(
+                                "Flow 浏览器操作失败，请检查页面登录、网络或重新连接"
+                            ))
+                        } else {
+                            Err(anyhow::anyhow!(
+                                "Flow 浏览器操作失败（{detail}），请检查页面登录、网络或重新连接"
+                            ))
+                        }
+                    }
                     None => Ok(result.value.unwrap_or(Value::Null)),
                 };
                 let _ = sender.send(value);
@@ -301,6 +310,11 @@ mod tests {
         assert_eq!(app.status().ready_accounts, 1);
         *peer.last_seen.lock().unwrap() = Instant::now() - ONLINE;
         assert_eq!(app.status().ready_accounts, 0);
+        // Localhost direct pairing works without a manual pairing code.
+        let (direct_id, direct_token) = app.pair_browser("", "user@example.test").await?;
+        assert_eq!(direct_id, id);
+        validate_fixture(&app, &direct_token, "user@example.test", json!([60])).await?;
+        assert_eq!(app.store.account(&id)?.credits, Some(60));
         Ok(())
     }
     #[tokio::test]
@@ -375,7 +389,9 @@ impl App {
         if !email.contains('@') || email.len() > 254 {
             bail!("Flow 页面尚未登录，请先登录后连接");
         }
-        self.bridge.consume_code(code)?;
+        if !code.trim().is_empty() {
+            self.bridge.consume_code(code)?;
+        }
         let mut account = self
             .store
             .accounts()?
@@ -385,12 +401,8 @@ impl App {
                 id: uuid::Uuid::new_v4().to_string(),
                 email,
                 enabled: true,
-                project_id: String::new(),
-                last_synced: None,
-                credits: None,
-                browser_data_dir: String::new(),
-                browser_profile: String::new(),
                 browser_bridge: true,
+                ..Account::default()
             });
         account.browser_bridge = true;
         account.last_synced = None;
@@ -412,7 +424,7 @@ impl App {
         let id = self
             .store
             .browser_connection(&digest(token))?
-            .context("浏览器连接已失效，请重新获取连接码")?;
+            .context("浏览器连接已失效，请重新连接当前账号")?;
         Ok(self.bridge.resume(&id))
     }
     pub async fn validate_browser(self: &Arc<Self>, peer: Arc<Peer>) {
@@ -442,6 +454,8 @@ impl App {
             }
             account.credits = Some(credits);
             account.last_synced = Some(now());
+            account.last_error = None;
+            account.consecutive_failures = 0;
             self.store.save_account(&account)?;
             self.refresh()?;
             Ok::<_, anyhow::Error>(())
