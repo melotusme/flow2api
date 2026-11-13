@@ -11,7 +11,7 @@
 
 当前是未签名开发包，不能当作已经签名、公证的正式发行版。缺少 WebView2 时 Windows 安装器会联网安装。使用者不需要安装 Rust、Python、Node 或 Docker。
 
-Windows 测试机 与 M3 已安装应用。无需再运行旧版 start-windows.cmd 或 Python 服务，以免占用同一 API 端口。重复打开桌面应用会恢复已有窗口。
+重复打开桌面应用会恢复已有窗口。不要再另起一个占用 8000 端口的服务。
 
 ## 2. 连接 Google 账号（v0.3.0）
 
@@ -40,7 +40,7 @@ Google Cookie 留在当前浏览器，不再复制到另一个 Chrome。连接�
 
 | 操作 | Windows | Mac |
 |---|---|---|
-| 查看状态菜单 | 任务栏右下角通知区域，必要时展开隐藏图标，右键 Flow2API 图标 | 点击菜单栏 Flow2API 图标（F） |
+| 查看状态菜单 | 任务栏右下角通知区域，必要时展开隐藏图标，右键 Flow2API 图标 | 点击菜单栏 Flow |
 | 恢复主窗口 | 左键托盘图标，或菜单“打开 Flow2API” | 菜单“打开 Flow2API”，或重新打开应用 |
 | 保持后台运行 | 关闭主窗口 | 关闭主窗口 |
 | 停止 API / 再次启动 | 状态菜单中的 API 停启项，或主窗口按钮 | 同左 |
@@ -86,14 +86,12 @@ rtk proxy python3 "$HOME/.codex/skills/hzr-flow2api-image/scripts/image.py" gene
 
 技能支持文生图和最多 5 张本机参考图，提供 5 种比例、Lite / Flash 系列和基础 / 2K / 4K 规格。Magpie 返回等待中的任务 ID 时，用技能的 `result --id ... --output 原路径` 查询同一任务。创建超时或状态未知时先核对应用任务和作品，不自动重新生成。
 
-开发者也可运行 `rtk proxy python3 scripts/connect_magpie.py --apply`，复用同一个 Rust 接入实现。首次需构建 `flow2api-magpie`；脚本读取桌面版数据库，不再读取旧版 `data/flow.db`。普通桌面用户只需点击按钮，无需 Python 或 Cargo。
+接入在桌面应用「设置与接入」里点「一键接入 Magpie」。普通使用不需要命令行。
 
 2026-11-04 本机已验证配置备份、幂等更新、端口 / Key 更新、冲突保护、Magpie 热加载与桌面按钮。Magpie 调用已经到达 Flow2API；当时可用账号为 0，返回未连接提示，尚未完成本轮真实出图验证。Windows 接入代码已适配配置路径与原子写入，但本轮未做 Windows 实机验收。
 
 health 的 healthy 只表示本机 API 能响应。active_tokens 为 0 表示没有通过登录同步的可用账号，暂不能生成；可用状态是最后一次登录校验缓存。
 
-当前日常界面已移除 Python 旧版迁移入口；新使用无需执行迁移。
-
 ## 验收边界
 
-安装、菜单操作、健康检查通过，不能证明图片/视频工作流全部可用。真实文生图、参考图、放大、视频各模式与长期会话刷新，仍需手动登录后逐项验证。完整进度见 docs/tauri-migration-progress.md。
+安装、菜单操作、健康检查通过，不能证明图片/视频工作流全部可用。真实文生图、参考图、放大、视频各模式与长期会话刷新，仍需手动登录后逐项验证。

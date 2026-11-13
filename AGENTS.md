@@ -15,9 +15,9 @@
 
 ```
 # --- 本次改动摘要 ---
-[运行] ./venv/bin/python main.py           # 启动服务
-[新增] config/setting.toml                 # 从 example 复制
-[安装] venv (requirements.txt)             # 依赖
+[运行] cargo tauri dev                     # 在 desktop 目录启动桌面应用
+[修改] desktop/src-tauri/src/lib.rs        # 菜单栏常驻
+[验证] curl -fsS http://127.0.0.1:8000/health
 # --- 验证 ---
 curl -s localhost:8000/health
 # --- 遗留 ---

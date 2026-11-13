@@ -29,7 +29,7 @@
 ## 验证
 
 ```bash
-rtk proxy env CARGO_HOME="$HOME/Library/Caches/flow2api-cargo" cargo test --offline --manifest-path $HOME/Documents/flow2api/desktop/Cargo.toml -p flow2api-core bridge::tests
+cargo test --manifest-path desktop/Cargo.toml -p flow2api-core bridge::tests
 rtk proxy curl -fsS http://127.0.0.1:8000/health
 ```
 

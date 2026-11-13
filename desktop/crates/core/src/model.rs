@@ -198,4 +198,43 @@ impl Status {
     pub fn busy(&self) -> bool {
         self.running + self.queued > 0
     }
+
+    /// Text beside the macOS menu-bar icon. Windows uses the tray icon color instead.
+    pub fn menu_bar_label(&self) -> String {
+        let count = self.running + self.queued;
+        if self.service == "failed" {
+            "Flow !".into()
+        } else if count > 0 {
+            format!("Flow {count}")
+        } else if self.service == "running" {
+            "Flow".into()
+        } else if self.service == "starting" || self.service == "stopping" {
+            "Flow …".into()
+        } else {
+            "Flow ·".into()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(service: &str, running: usize, queued: usize) -> Status {
+        Status {
+            service: service.into(),
+            running,
+            queued,
+            ..Status::default()
+        }
+    }
+
+    #[test]
+    fn menu_bar_label_names_the_resident_app() {
+        assert_eq!(status("running", 0, 0).menu_bar_label(), "Flow");
+        assert_eq!(status("running", 1, 2).menu_bar_label(), "Flow 3");
+        assert_eq!(status("failed", 0, 0).menu_bar_label(), "Flow !");
+        assert_eq!(status("starting", 0, 0).menu_bar_label(), "Flow …");
+        assert_eq!(status("stopped", 0, 0).menu_bar_label(), "Flow ·");
+    }
 }

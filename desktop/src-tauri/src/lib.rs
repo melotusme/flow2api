@@ -613,12 +613,23 @@ async fn webdav_action(state: tauri::State<'_, Desktop>, action: String) -> Resu
     }
     flow2api_core::webdav::perform(&state.core.store, &action).await
 }
-fn show(app: &tauri::AppHandle) {
+fn present(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+}
+
+/// Hide the workspace and keep the process in the menu bar (macOS) or notification area.
+fn park(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 }
 fn request_quit(app: &tauri::AppHandle) {
     if app
@@ -638,13 +649,45 @@ fn request_quit(app: &tauri::AppHandle) {
             }
             Err(error) => {
                 state.quit_in_progress.store(false, Ordering::SeqCst);
-                show(&app);
+                present(&app);
                 let _ = app.emit("notice", format!("无法退出：{error}"));
             }
         }
     });
 }
-fn icon(status: &Status) -> tauri::image::Image<'static> {
+fn tray_icon(status: &Status) -> tauri::image::Image<'static> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = status;
+        return menu_template_icon();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        status_dot(status)
+    }
+}
+
+/// Black “F” with alpha. macOS treats it as a template and tints it for the menu bar.
+#[cfg(target_os = "macos")]
+fn menu_template_icon() -> tauri::image::Image<'static> {
+    const N: u32 = 36;
+    let mut rgba = vec![0; (N * N * 4) as usize];
+    let mut fill = |x0: u32, y0: u32, x1: u32, y1: u32| {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let i = ((y * N + x) * 4) as usize;
+                rgba[i + 3] = 255;
+            }
+        }
+    };
+    fill(8, 6, 14, 30);
+    fill(8, 6, 28, 12);
+    fill(8, 16, 24, 22);
+    tauri::image::Image::new_owned(rgba, N, N)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn status_dot(status: &Status) -> tauri::image::Image<'static> {
     let color = if status.service == "failed" {
         [240, 112, 104]
     } else if status.busy() {
@@ -676,7 +719,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(updates::State::default())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show(app);
+            present(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -727,15 +770,22 @@ pub fn run() {
                     &MenuItem::with_id(app, "quit", "退出 Flow2API", true, None::<&str>)?,
                 ],
             )?;
-            let tray = TrayIconBuilder::with_id("flow2api-status")
-                .icon(icon(&status))
+            let mut tray_builder = TrayIconBuilder::with_id("flow2api-status")
+                .icon(tray_icon(&status))
                 .tooltip(status.tray_summary())
                 .menu(&menu)
-                .show_menu_on_left_click(cfg!(target_os = "macos"))
+                .show_menu_on_left_click(cfg!(target_os = "macos"));
+            #[cfg(target_os = "macos")]
+            {
+                tray_builder = tray_builder
+                    .icon_as_template(true)
+                    .title(status.menu_bar_label());
+            }
+            let tray = tray_builder
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => show(app),
+                    "show" => present(app),
                     "check_update" => {
-                        show(app);
+                        present(app);
                         let _ = app.emit("check_update", ());
                     }
                     "quit" => request_quit(app),
@@ -744,7 +794,7 @@ pub fn run() {
                         let current = app.autolaunch().is_enabled().unwrap_or(false);
                         if let Err(error) = apply_autostart(!current, &app) {
                             let _ = app.emit("notice", error);
-                            show(&app);
+                            present(&app);
                         }
                     }
                     "data" => {
@@ -763,7 +813,7 @@ pub fn run() {
                             };
                             if let Err(error) = value {
                                 let _ = app.emit("notice", error.to_string());
-                                show(&app);
+                                present(&app);
                             }
                         });
                     }
@@ -780,7 +830,7 @@ pub fn run() {
                             }
                         )
                     {
-                        show(tray.app_handle());
+                        present(tray.app_handle());
                     }
                 })
                 .build(app)?;
@@ -816,7 +866,10 @@ pub fn run() {
                             && matches!(status.service.as_str(), "running" | "stopped" | "failed"),
                     );
                     let _ = tray.set_tooltip(Some(status.tray_summary()));
-                    let _ = tray.set_icon(Some(icon(&status)));
+                    #[cfg(not(target_os = "macos"))]
+                    let _ = tray.set_icon(Some(status_dot(&status)));
+                    #[cfg(target_os = "macos")]
+                    let _ = tray.set_title(Some(status.menu_bar_label()));
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let progress = if status.service == "failed" {
                             tauri::window::ProgressBarStatus::Error
@@ -838,29 +891,23 @@ pub fn run() {
                             });
                         }
                     }
-                    #[cfg(target_os = "macos")]
-                    {
-                        let _ = tray.set_title(Some(if status.busy() {
-                            format!("F {}", status.running + status.queued)
-                        } else {
-                            "F".into()
-                        }));
-                    }
                     let _ = app_handle.emit("status", status);
                 }
             });
             tauri::async_runtime::spawn(async move {
                 let _ = core.start_service().await;
             });
-            if !std::env::args().any(|arg| arg == "--autostart") {
-                show(app.handle());
+            if std::env::args().any(|arg| arg == "--autostart") {
+                park(app.handle());
+            } else {
+                present(app.handle());
             }
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                park(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -918,8 +965,9 @@ pub fn run() {
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
-                show(app);
+                present(app);
             }
+            // Cmd+Q and the Dock Quit item. Closing the window is handled above and only parks the app.
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if !app.state::<Desktop>().quitting.load(Ordering::SeqCst) {
                     api.prevent_exit();

@@ -1,6 +1,6 @@
 # Flow2API 接入指南
 
-网页文档：<http://127.0.0.1:8000/guide>（需管理员登录）。
+地址和 API Key 以桌面应用「设置与接入」显示的为准。默认 Base URL 是 `http://127.0.0.1:8000/v1`。
 
 ## 接口契约
 
@@ -25,11 +25,7 @@
 
 不要把媒体模型设为普通编程 Agent 的默认模型；它们不承担普通文本问答和工具调用。先作为图片生成专用调用使用。Flow2API 的视频接口不能直接替换 Magpie Grok 的 `/v1/videos`。
 
-本机接入脚本（先预览，再应用；自动备份，密钥不输出）：
-```bash
-rtk proxy ./venv/bin/python scripts/connect_magpie.py
-rtk proxy ./venv/bin/python scripts/connect_magpie.py --apply
-```
+在桌面应用「设置与接入」点击「一键接入 Magpie」。按钮会备份并更新本机 Magpie 配置，密钥不出现在结果里。
 
 ## 价格快照
 
@@ -52,19 +48,12 @@ rtk proxy ./venv/bin/python scripts/connect_magpie.py --apply
 - `Magpie → Flow2API → 已登录 ego lite → Flow` 图片链路成功，非流式耗时 15.6 秒；成品已下载并查看。
 - 375 / 768 / 1440 宽度：工作台、文档、管理配置页没有整页横向溢出。
 - 悬浮信息、模型搜索、能力筛选、首帧缺失校验、配置分组与文档复制按钮已实际操作。
-- 12 项 Python 测试与 3 项 SSE 测试通过。SSE 覆盖 HTTP 200 后错误事件、连接中断、跨数据块分隔符。
 - 本次未重新测试视频生成或全部模型的上游权限；价格快照不构成扣费保证。
-
-```bash
-rtk proxy ./venv/bin/python -m unittest tests.test_model_metadata tests.test_ego_browser_bridge tests.test_browser_executable
-rtk proxy node --test tests/studio_stream.test.cjs
-rtk proxy ./status.sh
-```
 
 
 ## 自动保存与本机资源
 
-所有交付成功的图片（含放大结果）和视频先保存到服务所在电脑的 `data/generated/`，再通过 `/media/<sha256>.<ext>` 返回。工作台、API、Magpie 使用相同流程，无需开启临时缓存。保存失败会返回失败或明确回退为已保存的原图，不会把未保存的远程链接当作成功成品。
+所有交付成功的图片（含放大结果）和视频先保存到桌面应用数据目录的 `generated/`，再通过 `/media/<sha256>.<ext>` 返回。工作台、API、Magpie 使用相同流程，无需开启临时缓存。保存失败会返回失败或明确回退为已保存的原图，不会把未保存的远程链接当作成功成品。
 
 - `/library`：登录后查看、下载本机资源；`GET /api/library`：管理员登录会话读取目录和清单。
 - `GET /media/<filename>`：预览；加 `?download=true` 下载。文件名由内容 SHA256 得到，不同请求相同文件去重；实际扩展名按文件头识别。
