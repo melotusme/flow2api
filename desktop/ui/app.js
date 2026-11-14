@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.3.6';
+const APP_VERSION='0.3.7';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -230,6 +230,39 @@ function page(name,{focus=true}={}){
 page(state.page,{focus:false});
 document.querySelectorAll('[data-page]').forEach(element=>element.onclick=()=>page(element.dataset.page));
 document.querySelectorAll('[data-go]').forEach(element=>element.onclick=()=>page(element.dataset.go));
+
+const settingsNav=document.querySelector('.settings-nav');
+const settingsLinks=[...settingsNav.querySelectorAll('a')];
+const settingsSections=settingsLinks.map(link=>document.getElementById(link.hash.slice(1)));
+function highlightSettingsSection(id){
+  settingsLinks.forEach(link=>{
+    if(link.hash===`#${id}`)link.setAttribute('aria-current','location');
+    else link.removeAttribute('aria-current');
+  });
+}
+let settingsScrollFrame=0;
+function syncSettingsNavigation(){
+  settingsScrollFrame=0;
+  if(state.page!=='settings')return;
+  const edge=Math.max(90,settingsNav.getBoundingClientRect().bottom)+8;
+  let current=settingsSections[0];
+  for(const section of settingsSections){
+    if(section.getBoundingClientRect().top<=edge)current=section;
+  }
+  if(window.scrollY>0&&window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-2)current=settingsSections.at(-1);
+  highlightSettingsSection(current.id);
+}
+settingsLinks.forEach(link=>link.addEventListener('click',event=>{
+  event.preventDefault();
+  const section=document.getElementById(link.hash.slice(1));
+  section.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+  section.querySelector('h2').focus({preventScroll:true});
+  highlightSettingsSection(section.id);
+}));
+window.addEventListener('scroll',()=>{
+  if(!settingsScrollFrame)settingsScrollFrame=requestAnimationFrame(syncSettingsNavigation);
+},{passive:true});
+window.addEventListener('resize',syncSettingsNavigation);
 
 function updateStatus(status){
   state.status=status;
