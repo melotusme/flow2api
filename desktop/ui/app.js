@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.3.5';
+const APP_VERSION='0.3.6';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -340,7 +340,7 @@ function updateReadiness(){
   $('readiness').classList.toggle('ready',running&&ready.length>0&&(!chosen||ready.some(a=>a.id===chosen)));
   $('readiness-action').hidden=!actionText;$('readiness-action').textContent=actionText;
   $('generate').disabled=state.submitting||state.loadingImages||!running||!ready.length||Boolean(chosen&&!ready.some(a=>a.id===chosen));
-  $('generate').textContent=state.submitting?'正在提交…':'开始创作 ↗';
+  $('generate').textContent=state.submitting?'正在提交…':'生成';
 }
 $('readiness-action').onclick=()=>action($('readiness-action'),async()=>{
   if(state.status?.service!=='running'){await invoke('start_service');await refresh();}
