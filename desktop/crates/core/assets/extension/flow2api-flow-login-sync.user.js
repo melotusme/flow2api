@@ -186,12 +186,13 @@
     document.getElementById('flow2api-connection')?.remove();
     const panel = document.createElement('aside');
     panel.id = 'flow2api-connection';
+    panel.setAttribute('aria-label', 'Flow2API 本机直连');
     panel.style.cssText='position:fixed;bottom:20px;right:20px;z-index:2147483647;background:#152226;color:#e7eeec;padding:14px 16px;border:1px solid #30474b;border-radius:12px;font:13px system-ui;width:296px;box-shadow:0 8px 24px #0008';
     const header=document.createElement('div');
     header.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px';
     const title=document.createElement('strong'); title.textContent='Flow2API · 本机直连';
-    const toggle=document.createElement('button'); toggle.type='button'; toggle.textContent='收起';
-    toggle.style.cssText='background:transparent;color:#9bb0b4;border:1px solid #30474b;border-radius:6px;padding:2px 8px;font:11px system-ui;cursor:pointer';
+    const toggle=document.createElement('button'); toggle.type='button'; toggle.textContent='收起'; toggle.setAttribute('aria-expanded','true');
+    toggle.style.cssText='background:transparent;color:#9bb0b4;border:1px solid #30474b;border-radius:6px;padding:4px 10px;min-height:28px;font:11px system-ui;cursor:pointer';
     header.append(title,toggle);
     const body=document.createElement('div');
     const address=document.createElement('input'); address.value=connection?.server || GM_getValue(KEY+'.server','http://127.0.0.1:8000'); address.placeholder='本机应用地址'; address.setAttribute('aria-label','Flow2API 本机地址');
@@ -200,14 +201,15 @@
     const summary=document.createElement('summary'); summary.textContent='端口与连接码（本机免填）'; summary.style.cssText='cursor:pointer;color:#9bb0b4;font-size:12px;user-select:none';
     for(const input of [address,code]) input.style.cssText='display:block;width:100%;box-sizing:border-box;background:#0d1518;color:#e7eeec;border:1px solid #314448;border-radius:6px;padding:8px;font:12px system-ui;margin:8px 0 0';
     advanced.append(summary,address,code);
-    const button=document.createElement('button'); button.textContent='一键连接当前 Flow 账号';
+    const button=document.createElement('button'); button.type='button'; button.textContent='一键连接当前 Flow 账号';
     button.style.cssText='width:100%;padding:9px 10px;background:#85dfbf;color:#12352b;border:0;border-radius:6px;font-weight:600;cursor:pointer;margin-top:4px';
-    status=document.createElement('div');status.setAttribute('role','status'); status.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.55;margin-top:8px;color:#c7d6d8';
+    status=document.createElement('div');status.setAttribute('role','status'); status.setAttribute('aria-live','polite'); status.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.55;margin-top:8px;color:#c7d6d8';
     show('本机 localhost 免填连接码：登录 Flow 后自动或一键连接，Cookie 始终保留在当前浏览器。');
     toggle.onclick=()=>{
       const hidden = body.style.display === 'none';
       body.style.display = hidden ? 'block' : 'none';
       toggle.textContent = hidden ? '收起' : '展开';
+      toggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
       panel.style.width = hidden ? '296px' : 'auto';
     };
     async function pairNow(silent) {

@@ -1,25 +1,42 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-let APP_VERSION='0.3.8';
+let APP_VERSION='0.3.9';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
 const labels = {queued:'排队中',running:'生成中',succeeded:'已保存',failed:'失败',interrupted:'已中断',cancelled:'已取消',archived:'旧版已完成'};
 const titles = {studio:'创作工作台',tasks:'任务与进度',library:'本机作品',accounts:'Google 账号',settings:'设置与接入'};
-let noticeTimer;
+let noticeTimer=null,noticeSticky=false,noticePaused=false;
+
+function announce(message,urgent=false){
+  const target=$(urgent?'sr-alert':'sr-status');
+  if(!target)return;
+  target.textContent='';
+  requestAnimationFrame(()=>{target.textContent=String(message);});
+}
+function scheduleNoticeDismiss(){
+  clearTimeout(noticeTimer);
+  if(noticeSticky||noticePaused)return;
+  noticeTimer=setTimeout(()=>{$('notice').hidden=true;},6500);
+}
+const noticeBox=$('notice');
+noticeBox.addEventListener('mouseenter',()=>{noticePaused=true;clearTimeout(noticeTimer);});
+noticeBox.addEventListener('mouseleave',()=>{noticePaused=false;scheduleNoticeDismiss();});
+noticeBox.addEventListener('focusin',()=>{noticePaused=true;clearTimeout(noticeTimer);});
+noticeBox.addEventListener('focusout',()=>{noticePaused=false;scheduleNoticeDismiss();});
 
 function notice(message,error=false){
-  const box=$('notice');
-  box.replaceChildren(
-    node('span',String(message),'notice-text'),
-    button('关闭',()=>{box.hidden=true;clearTimeout(noticeTimer);},'text-button notice-close')
+  const text=String(message);
+  noticeSticky=Boolean(error);
+  noticePaused=false;
+  noticeBox.replaceChildren(
+    node('span',text,'notice-text'),
+    button('关闭',()=>{noticeBox.hidden=true;clearTimeout(noticeTimer);},'text-button notice-close')
   );
-  box.className=error?'error':'';
-  box.setAttribute('role',error?'alert':'status');
-  box.setAttribute('aria-live',error?'assertive':'polite');
-  box.hidden=false;
-  clearTimeout(noticeTimer);
-  if(!error)noticeTimer=setTimeout(()=>box.hidden=true,6500);
+  noticeBox.className=error?'error':'';
+  noticeBox.hidden=false;
+  announce(text,Boolean(error));
+  scheduleNoticeDismiss();
 }
 function node(tag,text,className){
   const element=document.createElement(tag);
@@ -27,10 +44,20 @@ function node(tag,text,className){
   if(className)element.className=className;
   return element;
 }
-async function action(button,callback){
-  const old=button.disabled;
-  button.disabled=true;
-  try{return await callback()}catch(error){notice(error,true)}finally{button.disabled=old}
+function setAriaDisabled(el,disabled){
+  if(!el)return;
+  if(disabled)el.setAttribute('aria-disabled','true');
+  else el.removeAttribute('aria-disabled');
+}
+async function action(control,callback){
+  if(!control)return callback();
+  if(control.dataset.busy==='1'||control.getAttribute('aria-disabled')==='true')return;
+  control.dataset.busy='1';
+  setAriaDisabled(control,true);
+  try{return await callback()}catch(error){notice(error,true)}finally{
+    delete control.dataset.busy;
+    setAriaDisabled(control,false);
+  }
 }
 function button(text,callback,className='secondary'){
   const b=node('button',text,className);
@@ -78,7 +105,7 @@ function createListView(config){
   search.type='search';
   search.placeholder=config.searchPlaceholder||'关键字筛选…';
   search.setAttribute('aria-label',config.searchPlaceholder||'关键字筛选');
-  search.oninput=()=>{view.query=search.value.trim().toLowerCase();view.page=1;render(true);};
+  search.oninput=()=>{view.query=search.value.trim().toLowerCase();view.page=1;render(true,true);};
   toolbar.append(search);
 
   let filterSelect=null;
@@ -90,7 +117,7 @@ function createListView(config){
       opt.value=item.value;
       filterSelect.append(opt);
     }
-    filterSelect.onchange=()=>{view.filter=filterSelect.value;view.page=1;render(true);};
+    filterSelect.onchange=()=>{view.filter=filterSelect.value;view.page=1;render(true,true);};
     toolbar.append(filterSelect);
   }
 
@@ -171,7 +198,7 @@ function createListView(config){
     pager.append(info,sizes,nav);
   }
 
-  function render(force=false){
+  function render(force=false,announceResult=false){
     const raw=view.items||[];
     const filtered=raw.filter(item=>{
       if(view.filter!=='all'&&config.matchFilter&&!config.matchFilter(item,view.filter))return false;
@@ -203,6 +230,10 @@ function createListView(config){
       for(const item of pageItems)body.append(config.renderItem(item));
     }
     renderPager(total,pages);
+    if(announceResult){
+      const summaryText=!raw.length?(config.emptyText||'暂无记录。'):!total?(config.noMatchText||'没有匹配筛选条件的记录。'):`已筛选出 ${total} 条记录，当前第 ${view.page} / ${pages} 页。`;
+      announce(summaryText,false);
+    }
   }
 
   return {
@@ -217,6 +248,7 @@ function createListView(config){
 function page(name,{focus=true}={}){
   state.page=name;
   document.querySelectorAll('.page').forEach(element=>element.hidden=element.id!==name);
+  if($('summary'))$('summary').hidden=!['studio','tasks'].includes(name);
   document.querySelectorAll('[data-page]').forEach(element=>{
     const active=element.dataset.page===name;
     element.classList.toggle('active',active);
@@ -273,10 +305,12 @@ function updateStatus(status){
   $('api-address').textContent=status.address||'仅监听本机地址';
   $('job-count').replaceChildren(node('span',String(status.running)),document.createTextNode(' '),node('em','执行中'));
   $('queue-count').textContent=`${status.queued} 个等待执行`;
-  $('nav-count').textContent=status.running+status.queued;
+  const activeCount=status.running+status.queued;
+  $('nav-count').textContent=activeCount;
+  $('nav-count').setAttribute('aria-label',`进行中任务 ${activeCount} 个`);
   $('error-count').textContent=status.failed?`${status.failed} 个失败／中断任务`:'任务状态正常';
   $('toggle-service').textContent=running?'停止 API':'启动 API';
-  $('toggle-service').disabled=status.running+status.queued>0||['starting','stopping'].includes(status.service);
+  setAriaDisabled($('toggle-service'),activeCount>0||['starting','stopping'].includes(status.service));
   $('data-path').textContent=status.data_dir;
   $('browser-status').textContent=status.browser;
   if(status.address)$('base-url').textContent=status.address+'/v1';
@@ -335,13 +369,22 @@ function studioRequest(){
 }
 function clearComposeError(){
   $('compose-error').hidden=true;
-  for(const id of ['prompt','images','video-id','model-family']){$(id).removeAttribute('aria-invalid');$(id).removeAttribute('aria-errormessage');}
+  for(const id of ['prompt','images','video-id','model-family']){
+    const el=$(id);
+    el.removeAttribute('aria-invalid');
+    const tokens=(el.getAttribute('aria-describedby')||'').split(/\s+/).filter(t=>t&&t!=='compose-error');
+    if(tokens.length)el.setAttribute('aria-describedby',tokens.join(' '));
+    else el.removeAttribute('aria-describedby');
+  }
 }
 function showComposeError(error){
   $('compose-error').textContent=error.message;$('compose-error').hidden=false;
-  $(error.field).setAttribute('aria-invalid','true');
-  $(error.field).setAttribute('aria-errormessage','compose-error');
-  $(error.field).focus();
+  const el=$(error.field);
+  el.setAttribute('aria-invalid','true');
+  const tokens=(el.getAttribute('aria-describedby')||'').split(/\s+/).filter(Boolean);
+  if(!tokens.includes('compose-error'))tokens.push('compose-error');
+  el.setAttribute('aria-describedby',tokens.join(' '));
+  el.focus();
 }
 function updateReadiness(){
   const running=state.status?.service==='running';
@@ -372,14 +415,15 @@ function updateReadiness(){
   $('readiness-title').textContent=title;$('readiness-detail').textContent=detail;
   $('readiness').classList.toggle('ready',running&&ready.length>0&&(!chosen||ready.some(a=>a.id===chosen)));
   $('readiness-action').hidden=!actionText;$('readiness-action').textContent=actionText;
-  $('generate').disabled=state.submitting||state.loadingImages||!running||!ready.length||Boolean(chosen&&!ready.some(a=>a.id===chosen));
+  const cannotGenerate=state.submitting||state.loadingImages||!running||!ready.length||Boolean(chosen&&!ready.some(a=>a.id===chosen));
+  setAriaDisabled($('generate'),cannotGenerate);
   $('generate').textContent=state.submitting?'正在提交…':'生成';
 }
 $('readiness-action').onclick=()=>action($('readiness-action'),async()=>{
   if(state.status?.service!=='running'){await invoke('start_service');await refresh();}
   else page('accounts');
 });
-$('back-to-studio').onclick=()=>page('studio');
+if($('back-to-studio'))$('back-to-studio').onclick=()=>page('studio');
 
 const DRAFT_KEY='flow-desktop-draft:v1';
 let draft={};
@@ -426,7 +470,7 @@ async function restoreDraft(){
 for(const id of ['prompt','video-id'])$(id).oninput=()=>{saveDraft();clearComposeError();};
 $('account').onchange=()=>{saveDraft();updateReadiness();};
 $('prompt').onkeydown=event=>{
-  if((event.ctrlKey||event.metaKey)&&event.key==='Enter'&&!event.isComposing){event.preventDefault();if(!$('generate').disabled)$('generate').click();}
+  if((event.ctrlKey||event.metaKey)&&event.key==='Enter'&&!event.isComposing){event.preventDefault();$('generate').click();}
 };
 $('prompt').placeholder+='（⌘ / Ctrl + Enter 提交）';
 $('clear-draft').onclick=async()=>{
@@ -654,8 +698,10 @@ async function chooseAccountProfile(account){
   dialog.setAttribute('aria-labelledby','profile-dialog-title');
   const heading=node('h2','选择已有的 Chrome 登录资料');
   heading.id='profile-dialog-title';
-  dialog.append(heading,node('p','选择你平时使用的资料，无需查找文件夹。资料中的账号名称仅用于辨认，登录状态仍需同步校验。','hint'));
-  const list=node('div',undefined,'profile-options');
+  heading.tabIndex=-1;
+  const header=node('div');
+  header.append(heading,node('p','选择你平时使用的资料，无需查找文件夹。资料中的账号名称仅用于辨认，登录状态仍需同步校验。','hint'));
+  const list=node('div',undefined,'dialog-body profile-options');
   const matching=profiles.filter(p=>p.email.toLowerCase()===account.email.toLowerCase());
   const ordered=[...matching,...profiles.filter(p=>!matching.includes(p))];
   for(const profile of ordered){
@@ -671,10 +717,11 @@ async function chooseAccountProfile(account){
     if(await bindAccountProfile(account,dataDir,profile))dialog.close();
   }));
   const previousFocus=document.activeElement;
-  dialog.append(list,controls);
+  dialog.append(header,list,controls);
   dialog.addEventListener('close',()=>{dialog.remove();previousFocus?.focus?.();},{once:true});
   document.body.append(dialog);
   dialog.showModal();
+  heading.focus({preventScroll:true});
 }
 
 function isTempDisabled(a){
@@ -966,17 +1013,19 @@ invoke('preferred_emails').then(emails=>{
 function mediaCard(media){
   const card=node('article',undefined,'media-card');
   const preview=node(media.kind==='image'?'img':'video');
+  if(media.kind==='video'){
+    preview.controls=true;
+    preview.preload='metadata';
+    preview.setAttribute('aria-label',media.prompt?`生成视频：${media.prompt.slice(0,60)}`:'本机生成视频');
+  }else{
+    preview.alt=media.prompt||'本机生成作品';
+    preview.loading='lazy';
+  }
   if(state.status?.address){
     preview.src=state.status.address+'/media/'+media.filename;
-    if(media.kind==='video'){
-      preview.controls=true;
-      preview.preload='metadata';
-    }else{
-      preview.alt=media.prompt||'本机生成作品';
-      preview.loading='lazy';
-    }
+  }else{
+    preview.hidden=true;
   }
-  if(!state.status?.address)preview.hidden=true;
   const info=node('div');
   if(!state.status?.address)info.append(node('p','启动本机 API 可预览；仍可打开本机文件。','hint'));
   info.append(node('small',`${media.kind==='image'?'图片':'视频'} · ${(media.size/1024/1024).toFixed(1)} MB · ${new Date(media.created_at).toLocaleString()}`));
@@ -1162,7 +1211,12 @@ $('images').onchange=async()=>{
 };
 
 $('generate').onclick=async()=>{
-  if(state.submitting||$('generate').disabled)return;
+  if(state.submitting)return;
+  if($('generate').getAttribute('aria-disabled')==='true'){
+    notice($('readiness-detail').textContent,true);
+    if(!$('readiness-action').hidden)$('readiness-action').focus();
+    return;
+  }
   clearComposeError();
   const request=studioRequest(),error=FlowStudio.validate(request,selectedModel());
   if(error){showComposeError(error);return;}
@@ -1226,17 +1280,21 @@ async function loadDevice(){
 }
 
 $('autostart').onchange=async()=>{
-  const want=$('autostart').checked;
-  $('autostart').disabled=true;
+  const box=$('autostart');
+  if(box.dataset.busy==='1'){box.checked=!box.checked;return;}
+  const want=box.checked;
+  box.dataset.busy='1';
+  setAriaDisabled(box,true);
   try{
     const actual=await invoke('set_autostart',{enabled:want});
-    $('autostart').checked=actual;
+    box.checked=actual;
     notice(actual?'已打开登录后自动启动':'已关闭登录后自动启动');
   }catch(error){
-    try{$('autostart').checked=await invoke('autostart_enabled');}catch{$('autostart').checked=false;}
+    try{box.checked=await invoke('autostart_enabled');}catch{box.checked=false;}
     notice(error,true);
   }finally{
-    $('autostart').disabled=false;
+    delete box.dataset.busy;
+    setAriaDisabled(box,false);
   }
 };
 
@@ -1304,14 +1362,15 @@ function renderUpdateStatus(status){
     :status.downloaded
       ?`立即安装 v${status.available_version} 并重启`
       :`下载并安装 v${status.available_version||''}`;
+  const installBusy=status.phase==='installing'||status.phase==='downloading';
   $('install-update').hidden=!hasAvailable;
   $('install-update').textContent=installLabel;
-  $('install-update').disabled=status.phase==='installing'||status.phase==='downloading';
+  setAriaDisabled($('install-update'),installBusy);
   const dialogInstall=document.getElementById('dialog-install-btn');
   if(dialogInstall){
     dialogInstall.style.display=hasAvailable?'inline-block':'none';
     dialogInstall.textContent=installLabel;
-    dialogInstall.disabled=status.phase==='installing'||status.phase==='downloading';
+    setAriaDisabled(dialogInstall,installBusy);
   }
   if($('update-badge')){
     $('update-badge').textContent=({
@@ -1330,23 +1389,30 @@ function renderUpdateStatus(status){
     :status.available_version
       ?`新版本 v${status.available_version} ↗`
       :'检查更新 ↗';
-  if($('header-check-update'))$('header-check-update').textContent=navUpdateLabel;
+  if($('header-check-update')){
+    $('header-check-update').hidden=!hasAvailable;
+    $('header-check-update').textContent=navUpdateLabel;
+  }
   if($('sidebar-check-update'))$('sidebar-check-update').textContent=navUpdateLabel;
 }
 
 if($('auto-update'))$('auto-update').onchange=async()=>{
-  const want=$('auto-update').checked;
-  $('auto-update').disabled=true;
+  const box=$('auto-update');
+  if(box.dataset.busy==='1'){box.checked=!box.checked;return;}
+  const want=box.checked;
+  box.dataset.busy='1';
+  setAriaDisabled(box,true);
   try{
     const actual=await invoke('set_auto_update',{enabled:want});
-    $('auto-update').checked=actual;
+    box.checked=actual;
     if(state.settings)state.settings.auto_update=actual;
     notice(actual?'已开启自动后台更新，发现新版本将在任务空闲时自动升级。':'已关闭自动后台更新，仍可随时手动检查。');
   }catch(error){
-    $('auto-update').checked=!want;
+    box.checked=!want;
     notice(error,true);
   }finally{
-    $('auto-update').disabled=false;
+    delete box.dataset.busy;
+    setAriaDisabled(box,false);
   }
 };
 
@@ -1361,17 +1427,19 @@ function showUpdateDialog(autoCheck=false){
     const headingWrap=node('div');
     const title=node('h2','软件版本与更新');
     title.id='update-dialog-title';
+    title.tabIndex=-1;
     const verLine=node('p',`当前运行版本：v${APP_VERSION}`,'hint');
     verLine.id='dialog-current-version';
     headingWrap.append(title,verLine);
     const closeBtn=button('关闭',()=>dialog.close(),'quiet');
-    closeBtn.style.fontSize='16px';
+    closeBtn.style.fontSize='14px';
     header.append(headingWrap,closeBtn);
 
-    const body=node('div');
-    body.style.margin='20px 0';
+    const body=node('div',undefined,'dialog-body');
     const statusText=node('p','点击“立即检查”从公开的 GitHub Release 检查最新版本，无需登录。','hint');
     statusText.id='dialog-update-status';
+    statusText.setAttribute('role','status');
+    statusText.setAttribute('aria-live','polite');
     const releaseNotes=node('pre',undefined,'update-notes');
     releaseNotes.id='dialog-update-notes';
     releaseNotes.style.display='none';
@@ -1391,13 +1459,15 @@ function showUpdateDialog(autoCheck=false){
     document.body.append(dialog);
   }
   if(latestUpdateStatus)renderUpdateStatus(latestUpdateStatus);
-  dialog.showModal();
+  if(!dialog.open)dialog.showModal();
+  document.getElementById('update-dialog-title')?.focus({preventScroll:true});
   if(autoCheck)runUpdateCheck(document.getElementById('dialog-check-btn'));
 }
 
 async function runUpdateCheck(triggerBtn){
   const btns=[triggerBtn,$('check-update'),$('header-check-update'),$('sidebar-check-update'),document.getElementById('dialog-check-btn')].filter(Boolean);
-  btns.forEach(b=>b.disabled=true);
+  if(btns.some(b=>b.dataset.busy==='1'))return;
+  btns.forEach(b=>{b.dataset.busy='1';setAriaDisabled(b,true);});
   const setStatus=(msg,notes=null)=>{
     $('update-status').textContent=msg;
     const dialogStatus=document.getElementById('dialog-update-status');
@@ -1439,7 +1509,7 @@ async function runUpdateCheck(triggerBtn){
     setStatus(msg);
     notice(msg,true);
   }finally{
-    btns.forEach(b=>b.disabled=false);
+    btns.forEach(b=>{delete b.dataset.busy;setAriaDisabled(b,false);});
   }
 }
 
