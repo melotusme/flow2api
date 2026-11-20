@@ -26,7 +26,7 @@
       <div class="aside-bottom">
         <div id="service-pill"><i aria-hidden="true"></i><span>正在连接</span></div>
         <div class="aside-update">
-          <span class="version-badge" id="aside-version">v0.3.10</span>
+          <span class="version-badge" id="aside-version">v0.3.11</span>
           <button id="sidebar-check-update" class="text-button" type="button">检查更新 ↗</button>
         </div>
         <small class="aside-tip">关闭窗口后留在菜单栏，API 继续运行。</small>
@@ -99,8 +99,10 @@
         </div>
       </section>
       <section id="library" class="page" hidden>
-        <div class="section-heading"><div><h2>保存在这台电脑上的作品</h2><p>生成成功后自动归档，升级应用时保留。</p></div><button class="secondary" id="open-data" type="button">打开文件目录 ↗</button></div>
-        <div id="media-grid"></div>
+        <div class="panel">
+          <div class="section-heading"><div><h2>保存在这台电脑上的作品</h2><p>生成成功后自动归档，升级应用时保留。</p></div><button class="secondary" id="open-data" type="button">打开文件目录 ↗</button></div>
+          <div id="media-grid"></div>
+        </div>
       </section>
       <section id="accounts" class="page" hidden>
         <div class="panel">
@@ -153,7 +155,7 @@
               <div class="actions"><button id="choose-browser" class="secondary" type="button">选择浏览器程序 ↗</button></div>
               <p class="hint">仅用于高级选项中的专用 Chrome 登录。默认浏览器连接无需设置此路径，网络跟随当前浏览器。</p>
               <label>HTTP / SOCKS5 代理<input name="proxy_url" type="url" spellcheck="false" placeholder="http://127.0.0.1:7890"></label>
-              <div class="form-grid">
+              <div class="form-grid form-grid-3">
                 <label>同时执行任务<input name="max_concurrent" type="number" min="1" max="8" required></label>
                 <label>图片超时（秒）<input name="image_timeout_seconds" type="number" min="30" required></label>
                 <label>视频超时（秒）<input name="video_timeout_seconds" type="number" min="30" required></label>
@@ -205,7 +207,7 @@
           </section>
           <section id="settings-updates" class="settings-section" aria-labelledby="settings-updates-title">
             <div class="section-heading">
-              <div><h2 id="settings-updates-title" tabindex="-1">软件版本与更新</h2><p>当前运行版本：<b id="settings-current-version">v0.3.10</b></p></div>
+              <div><h2 id="settings-updates-title" tabindex="-1">软件版本与更新</h2><p>当前运行版本：<b id="settings-current-version">v0.3.11</b></p></div>
               <span class="tag" id="update-badge">检查更新</span>
             </div>
             <p id="update-status" class="hint" role="status" aria-live="polite">从公开的 GitHub Release 检查更新，无需登录。</p>
@@ -221,7 +223,7 @@
         </div>
       </section>
       <footer>
-        <span id="footer-version">Flow2API Desktop v0.3.10 · Rust + Tauri</span>
+        <span id="footer-version">Flow2API Desktop v0.3.11 · Rust + Tauri</span>
         <span id="browser-status">Chrome 未连接</span>
       </footer>
     </main>

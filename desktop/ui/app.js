@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-let APP_VERSION='0.3.10';
+let APP_VERSION='0.3.11';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -1440,7 +1440,6 @@ function showUpdateDialog(autoCheck=false){
     verLine.id='dialog-current-version';
     headingWrap.append(title,verLine);
     const closeBtn=button('关闭',()=>dialog.close(),'quiet');
-    closeBtn.style.fontSize='14px';
     header.append(headingWrap,closeBtn);
 
     const body=node('div',undefined,'dialog-body');
