@@ -590,11 +590,13 @@ impl NativeSession {
             .replace("__REQUESTED_ACTION__", &serde_json::to_string(action)?)
             .replace("__TIMEOUT_MS__", "45000");
         let result = self.evaluate(&script).await?;
-        result["token"]
-            .as_str()
-            .filter(|v| !v.is_empty())
-            .map(str::to_owned)
-            .context("未获取到验证码，请检查 Chrome 中的 Flow 登录与网络")
+        if let Some(token) = result["token"].as_str().filter(|v| !v.is_empty()) {
+            return Ok(token.to_owned());
+        }
+        if let Some(detail) = result["error"].as_str().filter(|v| !v.is_empty()) {
+            bail!("未获取到验证码（{detail}），请检查 Chrome 中的 Flow 登录与网络");
+        }
+        bail!("未获取到验证码，请检查 Chrome 中的 Flow 登录与网络")
     }
     pub async fn fetch(
         &mut self,

@@ -1,3 +1,16 @@
+# v0.3.10 · 新增 Omni 1.2 Flash、新版 Flow 协议／验证码修复与多账号自动切换
+
+- **新增 Google Flow 最新视频模型 Omni 1.2 Flash**：
+  - 支持 `omni-1.2-flash` 及 `omni-1.2-flash-{3..15}s-{landscape|portrait}`（全套 3–15 秒横屏 16:9 与竖屏 9:16 规格，支持 0–3 张参考图，底层映射 `macaron_cookie_t2v_*` / `macaron_cookie_r2v_*`）。
+  - 11–15 秒长时长规格需要 Google AI Plus / Pro / Ultra 订阅；`Omni 1.1 Flash` 按官方计划保留至 2026-12-05。
+- **同步上游 Flow 前端协议与 reCAPTCHA 修复**：
+  - 修复新版 Flow 前端图生图（带参考图）调用 `ogiZ0b` 时缺少 15 槽尾项 `4` 导致触发 `PUBLIC_ERROR_UNUSUAL_ACTIVITY` 拒绝的问题。
+  - 修复图片生成 `4:3` 与 `3:4` 画面比例枚举映射互换的问题。
+  - 升级专用浏览器与连接脚本（v2.2.0）的 reCAPTCHA Enterprise 执行策略为多路径回退（已捕获执行器 → 直接执行 → 隐藏空容器无感渲染并在结束时清理），修复新版 Flow 报 `reCAPTCHA placeholder element must be empty` 的问题。
+- **多账号自动故障切换与渐进冷却**：
+  - 自动分配账号的任务在**提交前**遇到配额耗尽（`PUBLIC_ERROR_USER_QUOTA_REACHED` / `QUOTA_EXCEEDED` / `INSUFFICIENT_CREDITS` / `RESOURCE_EXHAUSTED`）、风控／限流（`PUBLIC_ERROR_UNUSUAL_ACTIVITY` / `RATE_LIMIT_EXCEEDED` / `TOO_MANY_REQUESTS`）或无该模型权限（`MODEL_ACCESS_DENIED`）时，自动排除失败账号并切换至下一个就绪账号重试（重新上传参考图，严格不重试提交状态不确定的请求，避免重复扣费）。
+  - 对触发风控／限流的账号施加渐进冷却（5 → 15 → 45 → 60 分钟，成功或同步后归零），对配额耗尽账号施加 60 分钟冷却，可在账号页随时手动解除。
+
 # v0.3.9 · 界面精简、响应式布局与无障碍体验升级
 
 - **更简洁的界面结构**：

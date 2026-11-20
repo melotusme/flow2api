@@ -322,6 +322,17 @@ mod tests {
             ),
             "gemini-3.1-flash-image-portrait"
         );
+        assert_eq!(
+            resolve("omni-1.2-flash", &json!({})),
+            "omni-1.2-flash-8s-landscape"
+        );
+        assert_eq!(
+            resolve(
+                "omni-1.2-flash",
+                &json!({"generationConfig":{"aspectRatio":"9:16"}})
+            ),
+            "omni-1.2-flash-8s-portrait"
+        );
         assert_eq!(oriented_dimensions(b"<html>not an image</html>"), None);
     }
     #[tokio::test]

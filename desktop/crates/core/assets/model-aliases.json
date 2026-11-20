@@ -170,6 +170,10 @@
       "landscape": "omni",
       "portrait": "omni_portrait"
     },
+    "omni-1.2-flash": {
+      "landscape": "omni-1.2-flash-8s-landscape",
+      "portrait": "omni-1.2-flash-8s-portrait"
+    },
     "veo_3_1_i2v_s_fast_fl": {
       "landscape": "veo_3_1_i2v_s_fast_fl",
       "portrait": "veo_3_1_i2v_s_fast_portrait_fl"

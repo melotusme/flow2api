@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-let APP_VERSION='0.3.9';
+let APP_VERSION='0.3.10';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -532,20 +532,28 @@ function explainErrorText(raw){
       advice:'处理建议：请更换不包含公众人物肖像的参考图，或修改人物描述。',
     };
   }
-  if(text.includes('PUBLIC_ERROR_QUOTA_EXCEEDED')||text.includes('PUBLIC_ERROR_INSUFFICIENT_CREDITS')||text.includes('RESOURCE_EXHAUSTED')||text.includes('积分不足')){
+  if(text.includes('PUBLIC_ERROR_QUOTA_EXCEEDED')||text.includes('PUBLIC_ERROR_USER_QUOTA_REACHED')||text.includes('PUBLIC_ERROR_INSUFFICIENT_CREDITS')||text.includes('RESOURCE_EXHAUSTED')||text.includes('积分不足')){
     return {
       stageText:'失败：当前账号 AI 积分不足或配额耗尽',
       title:'账号 AI Credits 积分不足或达到配额上限',
       detail:'当前执行的 Google 账号剩余积分不足以支付本次生成，或已达到周期配额限制。',
-      advice:'处理建议：在账号页点击「同步登录」核对最新余额，将该账号「临时禁用」或切换其他积分充足的账号重试。',
+      advice:'处理建议：自动分配模式下系统会自动冷却该账号并切换其他可用账号；也可在账号页核对余额或手动解除冷却。',
+    };
+  }
+  if(text.includes('PUBLIC_ERROR_UNUSUAL_ACTIVITY')||text.includes('异常活动风控')){
+    return {
+      stageText:'失败：账号触发上游异常活动风控拦截',
+      title:'当前账号触发 Google Flow 异常活动风控（PUBLIC_ERROR_UNUSUAL_ACTIVITY）',
+      detail:'Google Flow 认为当前账号或会话短时间存在异常活动而拒绝本次提交。系统已对该账号自动施加渐进冷却（5→15→45→60 分钟）。',
+      advice:'处理建议：请确保浏览器连接脚本已更新至 v2.2.0+，等待冷却自动解除或使用其他可用账号分摊请求。',
     };
   }
   if(text.includes('PUBLIC_ERROR_RATE_LIMIT_EXCEEDED')||text.includes('PUBLIC_ERROR_TOO_MANY_REQUESTS')||text.includes('触发上游限流')){
     return {
       stageText:'失败：请求过于频繁触发上游限流',
       title:'请求频率过高触发 Flow 限流',
-      detail:'当前账号短时间内提交了过多请求，被 Google Flow 暂时限流。',
-      advice:'处理建议：点击下方「临时禁用该号 1 小时」让账号冷却，或切换其他账号执行。',
+      detail:'当前账号短时间内提交了过多请求，被 Google Flow 暂时限流。系统已对该账号自动施加渐进冷却。',
+      advice:'处理建议：等待冷却恢复或配置多个账号分摊并发，也可在账号页随时手动解除冷却。',
     };
   }
   if(text.includes('Flow RPC 返回错误或缺少数据')||text.includes('NOT_FOUND')){
@@ -569,7 +577,7 @@ function explainErrorText(raw){
       stageText:'失败：获取 Google reCAPTCHA 验证码失败',
       title:'未能从浏览器获取 Flow 验证码',
       detail:'Flow 页面中的 reCAPTCHA Enterprise 校验未就绪或执行超时。',
-      advice:'处理建议：刷新浏览器中的 Flow 页面，并确保已安装最新版本的连接脚本（v2.1.0+）。',
+      advice:'处理建议：刷新浏览器中的 Flow 页面，并确保已安装最新版本的连接脚本（v2.2.0+）。',
     };
   }
   return {

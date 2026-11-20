@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flow2API 登录态同步
 // @namespace    flow2api
-// @version      2.1.0
+// @version      2.2.0
 // @description  将当前 Flow 标签页免连接码直连到本机桌面应用，Google Cookie 始终留在浏览器
 // @match        https://flow.google.com/*
 // @grant        GM_xmlhttpRequest
@@ -146,11 +146,78 @@
       case 'captcha': {
         if (!['IMAGE_GENERATION','VIDEO_GENERATION','UPLOAD_IMAGE'].includes(input.action)) throw Error('验证码动作无效');
         for (let i=0; i<80 && !page.grecaptcha?.enterprise; i++) await delay(250);
-        const execute = page.__flow2apiTrustedRecaptchaExecute || page.grecaptcha?.enterprise?.execute;
-        if (typeof execute !== 'function') throw Error('Flow 验证码尚未就绪');
-        const token = await Promise.race([execute.call(page.grecaptcha.enterprise, '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV', {action:input.action}), delay(45000).then(()=>{throw Error('验证码超时');})]);
-        if (!token) throw Error('验证码为空');
-        return {token};
+        const siteKey = '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV';
+        const deadline = Date.now() + 45000;
+        const captured = page.__flow2apiTrustedRecaptchaExecute;
+        const enterprise = page.grecaptcha?.enterprise;
+        const actionGuard = !!page.__flow2apiRecaptchaActionGuardInstalled;
+        const errors = [];
+        const strategies = [];
+        let container = null;
+        if (typeof captured === 'function') {
+          strategies.push(['captured', () => captured(siteKey, {action:input.action})]);
+        }
+        if (enterprise && typeof enterprise.execute === 'function') {
+          let executeSource = '';
+          try { executeSource = String(enterprise.execute); } catch {}
+          if (executeSource.includes('extension_hijack_detected') && !actionGuard) {
+            errors.push('action guard 不可用');
+          } else {
+            strategies.push(['direct', () => enterprise.execute.call(enterprise, siteKey, {action:input.action})]);
+            if (typeof enterprise.render === 'function') {
+              strategies.push(['render', () => {
+                container = document.createElement('div');
+                container.setAttribute('data-flow2api-recaptcha', '1');
+                container.style.display = 'none';
+                (document.body || document.documentElement).appendChild(container);
+                const clientId = enterprise.render(container, {sitekey:siteKey, size:'invisible', action:input.action});
+                return enterprise.execute.call(enterprise, clientId, {action:input.action});
+              }]);
+            }
+          }
+        }
+        if (!strategies.length) throw Error('Flow 验证码尚未就绪' + (errors.length ? '（' + errors.join(' | ') + '）' : ''));
+        const attempts = [];
+        let successfulToken = null;
+        let resolveSuccess;
+        const successPromise = new Promise(resolve => { resolveSuccess = resolve; });
+        const waitForResult = async (completion, waitMs) => {
+          let t;
+          try {
+            await Promise.race([successPromise, completion, new Promise(resolve => { t = setTimeout(resolve, Math.max(0, waitMs)); })]);
+          } finally { clearTimeout(t); }
+        };
+        try {
+          for (let index = 0; index < strategies.length; index += 1) {
+            const [label, factory] = strategies[index];
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) { errors.push(label + ': 超时'); break; }
+            const attempt = {label, settled:false};
+            attempt.promise = Promise.resolve().then(factory).then(token => {
+              attempt.settled = true;
+              const normalized = typeof token === 'string' ? token.trim() : '';
+              if (!normalized) errors.push(label + ': 验证码为空');
+              else if (Date.now() >= deadline) errors.push(label + ': 超时');
+              else if (!successfulToken) { successfulToken = normalized; resolveSuccess(normalized); }
+            }, err => {
+              attempt.settled = true;
+              errors.push(label + ': ' + (err?.message || String(err)));
+            });
+            attempts.push(attempt);
+            const attemptMs = Math.max(1, Math.floor(remaining / (strategies.length - index)));
+            await waitForResult(attempt.promise, attemptMs);
+            if (successfulToken) return {token: successfulToken};
+          }
+          const remaining = deadline - Date.now();
+          if (remaining > 0 && attempts.some(a => !a.settled)) {
+            await waitForResult(Promise.all(attempts.map(a => a.promise)), remaining);
+          }
+          if (successfulToken) return {token: successfulToken};
+          for (const a of attempts) { if (!a.settled) errors.push(a.label + ': 超时'); }
+          throw Error('验证码获取失败（' + (errors.join(' | ') || '超时') + '）');
+        } finally {
+          if (container) container.remove();
+        }
       }
       default: throw Error('不支持的浏览器操作');
     }

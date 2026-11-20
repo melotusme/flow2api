@@ -35,8 +35,8 @@ pub fn image_argument(
     let aspect = match aspect {
         "IMAGE_ASPECT_RATIO_SQUARE" => 1,
         "IMAGE_ASPECT_RATIO_PORTRAIT" => 2,
-        "IMAGE_ASPECT_RATIO_LANDSCAPE_FOUR_THREE" => 4,
-        "IMAGE_ASPECT_RATIO_PORTRAIT_THREE_FOUR" => 5,
+        "IMAGE_ASPECT_RATIO_PORTRAIT_THREE_FOUR" => 4,
+        "IMAGE_ASPECT_RATIO_LANDSCAPE_FOUR_THREE" => 5,
         _ => 3,
     };
     let refs = if references.is_empty() {
@@ -48,28 +48,27 @@ pub fn image_argument(
             .collect::<Vec<_>>())
     };
     let seed = (uuid::Uuid::new_v4().as_u128() % 2_147_483_646 + 1) as u32;
-    json!([
-        null,
-        [[
-            null,
-            null,
-            refs,
-            seed,
-            aspect,
-            model,
-            null,
-            context(project, captcha),
-            [[[prompt]]],
-            null,
-            null,
-            null,
-            session,
-            uuid::Uuid::new_v4().to_string().to_uppercase()
-        ]],
-        1,
+    let mut item = vec![
+        Value::Null,
+        Value::Null,
+        refs,
+        json!(seed),
+        json!(aspect),
+        json!(model),
+        Value::Null,
         context(project, captcha),
-        [session]
-    ])
+        json!([[[prompt]]]),
+        Value::Null,
+        Value::Null,
+        Value::Null,
+        json!(session),
+        json!(uuid::Uuid::new_v4().to_string().to_uppercase()),
+    ];
+    // Flow frontend (2026-11-05+) requires a 15th slot (4) when reference images are attached.
+    if !references.is_empty() {
+        item.push(json!(4));
+    }
+    json!([null, [item], 1, context(project, captcha), [session]])
 }
 
 pub fn video_argument(
@@ -249,15 +248,20 @@ pub fn explain_error_code(code: &str) -> (&'static str, &'static str) {
             "请更换不包含特定公众人物面部特征的参考图或描述",
         ),
         "PUBLIC_ERROR_QUOTA_EXCEEDED"
+        | "PUBLIC_ERROR_USER_QUOTA_REACHED"
         | "PUBLIC_ERROR_INSUFFICIENT_CREDITS"
         | "ERROR_QUOTA_EXCEEDED"
         | "ERROR_RESOURCE_EXHAUSTED" => (
             "当前账号 AI 积分不足或达到配额上限",
-            "请在账号页同步核对剩余积分、临时禁用该账号，或切换到积分充足的账号",
+            "自动分配任务会自动冷却该账号并切换其他账号重试；也可在账号页同步核对剩余积分",
+        ),
+        "PUBLIC_ERROR_UNUSUAL_ACTIVITY" => (
+            "当前账号触发上游异常活动风控拦截",
+            "自动分配任务会对该账号施加渐进冷却（5→15→45→60 分钟）并切换其他账号重试；建议降低单号请求频率",
         ),
         "PUBLIC_ERROR_RATE_LIMIT_EXCEEDED" | "PUBLIC_ERROR_TOO_MANY_REQUESTS" => (
             "当前账号请求过于频繁，触发上游限流",
-            "建议将该账号临时禁用 15–60 分钟，或配置多个账号分摊并发",
+            "自动分配任务会对该账号施加渐进冷却并切换其他账号重试；建议配置多个账号分摊并发",
         ),
         "PUBLIC_ERROR_INVALID_ARGUMENT" | "PUBLIC_ERROR_BAD_REQUEST" => (
             "请求参数或参考图不被上游模型接受",
@@ -525,10 +529,35 @@ mod tests {
             "captcha",
             &["ref".into()],
         );
-        assert_eq!(argument[1][0][5], "HARBOR_SEAL");
-        assert_eq!(argument[1][0][4], 1);
-        assert_eq!(argument[1][0][8], json!([[["prompt"]]]));
-        assert_eq!(argument[1][0][2][0][0], "ref");
+        let item = argument[1][0].as_array().unwrap();
+        assert_eq!(item.len(), 15);
+        assert_eq!(item[14], 4);
+        assert_eq!(item[5], "HARBOR_SEAL");
+        assert_eq!(item[4], 1);
+        assert_eq!(item[8], json!([[["prompt"]]]));
+        assert_eq!(item[2][0][0], "ref");
         assert_eq!(argument[3][10][0], "captcha");
+
+        let text_only = image_argument(
+            "project",
+            "prompt",
+            "BELUGA",
+            "IMAGE_ASPECT_RATIO_LANDSCAPE_FOUR_THREE",
+            "captcha",
+            &[],
+        );
+        let text_item = text_only[1][0].as_array().unwrap();
+        assert_eq!(text_item.len(), 14);
+        assert_eq!(text_item[4], 5);
+
+        let portrait_34 = image_argument(
+            "project",
+            "prompt",
+            "BELUGA",
+            "IMAGE_ASPECT_RATIO_PORTRAIT_THREE_FOUR",
+            "captcha",
+            &[],
+        );
+        assert_eq!(portrait_34[1][0][4], 4);
     }
 }

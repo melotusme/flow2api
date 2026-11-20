@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::time::{sleep, timeout};
 
 pub fn validate(request: &GenerationRequest) -> Result<Value> {
@@ -278,6 +278,7 @@ impl App {
                 }
             }
         }
+        let auto_assign = request.account_id.is_none();
         let accounts = self.store.accounts()?;
         let is_ready = |a: &Account| {
             a.available()
@@ -368,21 +369,16 @@ impl App {
         let app = self.clone();
         let id = task.id.clone();
         tokio::spawn(async move {
-            let result = app.run_task(&id).await;
+            let result = app.run_task_with_mode(&id, auto_assign).await;
             if let Err(error) = result {
                 let raw = error.to_string();
-                let mut account_email = None;
-                if let Ok(task) = app.store.task(&id) {
-                    if let Some(account_id) = task.request.account_id.as_deref() {
-                        if let Ok(mut account) = app.store.account(account_id) {
-                            account_email = Some(account.email.clone());
-                            account.last_error = Some(raw.clone());
-                            account.consecutive_failures =
-                                account.consecutive_failures.saturating_add(1);
-                            let _ = app.store.save_account(&account);
-                        }
-                    }
-                }
+                let account_email = app
+                    .store
+                    .task(&id)
+                    .ok()
+                    .and_then(|task| task.request.account_id)
+                    .and_then(|account_id| app.store.account(&account_id).ok())
+                    .map(|account| account.email);
                 let detailed = match account_email {
                     Some(email) if !raw.contains(&email) => format!("账号 {email}：{raw}"),
                     _ => raw,
@@ -425,7 +421,32 @@ impl App {
         self.store.save_task(&task)?;
         self.refresh()
     }
+    fn pick_ready_account(
+        &self,
+        is_video: bool,
+        excluded: &HashSet<String>,
+    ) -> Result<Option<Account>> {
+        let accounts = self.store.accounts()?;
+        let tasks = self.store.task_summaries()?;
+        Ok(accounts
+            .into_iter()
+            .filter(|a| {
+                !excluded.contains(&a.id)
+                    && a.available()
+                    && a.supports_kind(is_video)
+                    && a.last_synced.is_some()
+                    && (!a.browser_bridge || self.bridge.ready(&a.id))
+            })
+            .min_by_key(|a| account_load(a, &tasks)))
+    }
+    #[cfg(test)]
     async fn run_task(&self, id: &str) -> Result<()> {
+        self.run_task_with_mode(id, false).await
+    }
+    async fn run_task_with_mode(&self, id: &str, auto_assign: bool) -> Result<()> {
+        const MAX_FAILOVER_ACCOUNTS: usize = 6;
+        const MAX_RISK_FAILOVERS: usize = 3;
+
         let _permit = self.workers.acquire().await?;
         let admission = self.job_gate.lock().await;
         let mut task = self.store.task(id)?;
@@ -440,37 +461,110 @@ impl App {
         drop(admission);
         let settings = self.store.settings()?;
         let model = validate(&task.request)?;
+        let is_video = model["config"]["type"] == "video";
         let timeout_seconds = if model["config"]["type"] == "image" {
             settings.image_timeout_seconds
         } else {
             settings.video_timeout_seconds
         };
-        let account = self
-            .store
-            .account(task.request.account_id.as_deref().context("任务缺少账号")?)?;
-        let session = self.account_session(&account).await?;
-        // Sessions serialize requests for one Google account. Waiting for another
-        // task's browser must not consume this task's generation deadline.
-        let mut session = session.lock().await;
-        // A previous task may have created the project while this one waited.
-        let mut account = self.store.account(&account.id)?;
-        let media = timeout(
-            Duration::from_secs(timeout_seconds),
-            self.generate(&task, &model, &settings, &mut session, &mut account),
-        )
-        .await
-        .context("生成超时，Flow 可能仍在执行；请核对上游结果后决定是否重试")??;
-        if account.last_error.is_some() || account.consecutive_failures > 0 {
-            account.last_error = None;
-            account.consecutive_failures = 0;
-            let _ = self.store.save_account(&account);
+
+        let mut excluded: HashSet<String> = HashSet::new();
+        let mut attempts: Vec<(String, String)> = Vec::new();
+        let mut risk_switches: usize = 0;
+
+        loop {
+            let account_id = task.request.account_id.clone().context("任务缺少账号")?;
+            let account = self.store.account(&account_id)?;
+            let mut submitted = false;
+            let outcome: Result<(Account, Vec<Media>)> = async {
+                let session = self.account_session(&account).await?;
+                // Sessions serialize requests for one Google account. Waiting for another
+                // task's browser must not consume this task's generation deadline.
+                let mut session = session.lock().await;
+                // A previous task may have created the project while this one waited.
+                let mut fresh = self.store.account(&account.id)?;
+                let media = timeout(
+                    Duration::from_secs(timeout_seconds),
+                    self.generate(
+                        &task,
+                        &model,
+                        &settings,
+                        &mut session,
+                        &mut fresh,
+                        &mut submitted,
+                    ),
+                )
+                .await
+                .context("生成超时，Flow 可能仍在执行；请核对上游结果后决定是否重试")??;
+                Ok((fresh, media))
+            }
+            .await;
+
+            match outcome {
+                Ok((mut account, media)) => {
+                    if account.last_error.is_some() || account.consecutive_failures > 0 {
+                        account.last_error = None;
+                        account.consecutive_failures = 0;
+                        let _ = self.store.save_account(&account);
+                    }
+                    task.results = media;
+                    task.state = "succeeded".into();
+                    task.stage = "已完成并保存到本机".into();
+                    task.updated_at = now();
+                    self.store.save_task(&task)?;
+                    return self.refresh();
+                }
+                Err(error) => {
+                    let raw = error.to_string();
+                    let kind = if submitted {
+                        None
+                    } else {
+                        classify_failover_error(&raw)
+                    };
+                    if let Ok(mut failed_account) = self.store.account(&account.id) {
+                        apply_account_failure(&mut failed_account, &raw, kind);
+                        let _ = self.store.save_account(&failed_account);
+                    }
+                    excluded.insert(account.id.clone());
+                    attempts.push((account.email.clone(), short_failover_reason(kind, &raw)));
+
+                    let can_switch = auto_assign
+                        && kind.is_some()
+                        && excluded.len() < MAX_FAILOVER_ACCOUNTS
+                        && (kind != Some(FailoverKind::Risk) || risk_switches < MAX_RISK_FAILOVERS);
+
+                    if can_switch {
+                        if let Ok(Some(next)) = self.pick_ready_account(is_video, &excluded) {
+                            if kind == Some(FailoverKind::Risk) {
+                                risk_switches += 1;
+                            }
+                            task.request.account_id = Some(next.id.clone());
+                            task.stage = format!(
+                                "账号 {} 受限，已自动切换至 {} 重试",
+                                account.email, next.email
+                            );
+                            task.updated_at = now();
+                            self.store.save_task(&task)?;
+                            let _ = self.refresh();
+                            continue;
+                        }
+                    }
+
+                    if attempts.len() > 1 {
+                        let summary = attempts
+                            .iter()
+                            .map(|(email, reason)| format!("{email}（{reason}）"))
+                            .collect::<Vec<_>>()
+                            .join("；");
+                        bail!(
+                            "已自动切换尝试 {} 个账号均未成功：{summary}｜最后错误：{raw}",
+                            attempts.len()
+                        );
+                    }
+                    return Err(error);
+                }
+            }
         }
-        task.results = media;
-        task.state = "succeeded".into();
-        task.stage = "已完成并保存到本机".into();
-        task.updated_at = now();
-        self.store.save_task(&task)?;
-        self.refresh()
     }
     async fn generate(
         &self,
@@ -479,7 +573,9 @@ impl App {
         settings: &Settings,
         session: &mut Session,
         account: &mut Account,
+        submitted: &mut bool,
     ) -> Result<Vec<Media>> {
+        *submitted = false;
         self.verify_login(session, account).await?;
         if account.project_id.is_empty() {
             self.stage(&task.id, "创建 Flow 项目")?;
@@ -534,6 +630,7 @@ impl App {
                 &references,
             );
             let payload = flow::rpc(session, "ogiZ0b", argument, Some(&account.project_id)).await?;
+            *submitted = true;
             let items = payload[0].as_array().context("图片生成未返回媒体")?;
             let mut results = vec![];
             for item in items {
@@ -634,8 +731,10 @@ impl App {
                 }
                 Err(error) => return Err(error),
             };
+            let batch = crate::video::VideoBatch::submitted(&payload, &account.project_id)?;
+            *submitted = true;
             let videos = self
-                .poll_video(session, task, &account.project_id, payload)
+                .poll_video(session, task, &account.project_id, batch)
                 .await?;
             let mut results = vec![];
             for video in videos {
@@ -662,7 +761,9 @@ impl App {
                     )?;
                     let payload =
                         flow::rpc(session, rpc, argument, Some(&account.project_id)).await?;
-                    self.poll_video(session, task, &account.project_id, payload)
+                    let upsample_batch =
+                        crate::video::VideoBatch::submitted(&payload, &account.project_id)?;
+                    self.poll_video(session, task, &account.project_id, upsample_batch)
                         .await?
                 } else {
                     vec![video]
@@ -683,9 +784,8 @@ impl App {
         session: &mut Session,
         task: &Task,
         project: &str,
-        payload: Value,
+        mut batch: crate::video::VideoBatch,
     ) -> Result<Vec<crate::video::VideoResult>> {
-        let mut batch = crate::video::VideoBatch::submitted(&payload, project)?;
         loop {
             if let Some(results) = batch.results() {
                 return Ok(results);
@@ -792,6 +892,109 @@ impl App {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FailoverKind {
+    Quota,
+    Risk,
+    ModelAccess,
+}
+
+fn classify_failover_error(error_text: &str) -> Option<FailoverKind> {
+    if error_text.contains("生成超时")
+        || error_text.contains("可能仍在执行")
+        || error_text.contains("请求可能已提交")
+        || error_text.contains("请求可能已被接受")
+        || error_text.contains("浏览器连接已替换或断开")
+        || error_text.contains("作品下载")
+        || error_text.contains("轮询视频生成状态")
+        || error_text.contains("查询视频媒体地址")
+        || error_text.contains("图片高清放大")
+        || error_text.contains("视频高清放大")
+    {
+        return None;
+    }
+    if error_text.contains("PUBLIC_ERROR_USER_QUOTA_REACHED")
+        || error_text.contains("PUBLIC_ERROR_QUOTA_EXCEEDED")
+        || error_text.contains("PUBLIC_ERROR_INSUFFICIENT_CREDITS")
+        || error_text.contains("ERROR_QUOTA_EXCEEDED")
+        || error_text.contains("ERROR_RESOURCE_EXHAUSTED")
+        || error_text.contains("RESOURCE_EXHAUSTED")
+    {
+        return Some(FailoverKind::Quota);
+    }
+    if error_text.contains("PUBLIC_ERROR_UNUSUAL_ACTIVITY")
+        || error_text.contains("PUBLIC_ERROR_RATE_LIMIT_EXCEEDED")
+        || error_text.contains("PUBLIC_ERROR_TOO_MANY_REQUESTS")
+    {
+        return Some(FailoverKind::Risk);
+    }
+    if error_text.contains("PUBLIC_ERROR_MODEL_ACCESS_DENIED")
+        || error_text.contains("ERROR_MODEL_ACCESS_DENIED")
+    {
+        return Some(FailoverKind::ModelAccess);
+    }
+    None
+}
+
+fn risk_cooldown_minutes(consecutive_failures: u32) -> i64 {
+    match consecutive_failures {
+        0 | 1 => 5,
+        2 => 15,
+        3 => 45,
+        _ => 60,
+    }
+}
+
+fn short_failover_reason(kind: Option<FailoverKind>, raw: &str) -> String {
+    match kind {
+        Some(FailoverKind::Quota) => "积分不足或配额上限".into(),
+        Some(FailoverKind::Risk) => {
+            if raw.contains("UNUSUAL_ACTIVITY") {
+                "异常活动风控".into()
+            } else {
+                "触发上游限流".into()
+            }
+        }
+        Some(FailoverKind::ModelAccess) => "无该模型权限".into(),
+        None => raw.chars().take(48).collect(),
+    }
+}
+
+fn extend_disabled_until(account: &mut Account, until: String, reason: String) {
+    let keep_existing = account
+        .disabled_until
+        .as_deref()
+        .is_some_and(|existing| existing > until.as_str());
+    if !keep_existing {
+        account.disabled_until = Some(until);
+        account.disabled_reason = Some(reason);
+    }
+}
+
+fn apply_account_failure(account: &mut Account, raw_error: &str, kind: Option<FailoverKind>) {
+    account.last_error = Some(raw_error.to_owned());
+    account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+    match kind {
+        Some(FailoverKind::Risk) => {
+            let minutes = risk_cooldown_minutes(account.consecutive_failures);
+            let short = short_failover_reason(kind, raw_error);
+            extend_disabled_until(
+                account,
+                after_minutes(minutes),
+                format!("自动风控冷却 {minutes} 分钟：{short}"),
+            );
+        }
+        Some(FailoverKind::Quota) => {
+            extend_disabled_until(
+                account,
+                after_minutes(60),
+                "自动配额冷却 60 分钟：积分不足或达到配额上限".into(),
+            );
+        }
+        Some(FailoverKind::ModelAccess) | None => {}
+    }
+}
+
 fn is_pre_submission_model_error(error: &anyhow::Error) -> bool {
     let text = error.to_string();
     text.contains("Flow RPC 返回错误或缺少数据")
@@ -813,11 +1016,14 @@ pub fn summarize_failure_stage(previous_stage: &str, error_text: &str) -> String
     } else if error_text.contains("PROMINENT_PEOPLE") || error_text.contains("人物保护") {
         "触发人物保护拦截"
     } else if error_text.contains("QUOTA_EXCEEDED")
+        || error_text.contains("USER_QUOTA_REACHED")
         || error_text.contains("INSUFFICIENT_CREDITS")
         || error_text.contains("积分不足")
         || error_text.contains("RESOURCE_EXHAUSTED")
     {
         "账号积分不足或超额"
+    } else if error_text.contains("UNUSUAL_ACTIVITY") || error_text.contains("异常活动风控") {
+        "账号触发上游风控拦截"
     } else if error_text.contains("RATE_LIMIT")
         || error_text.contains("TOO_MANY_REQUESTS")
         || error_text.contains("限流")
@@ -1135,6 +1341,147 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn failover_classification_ignores_uncertain_and_post_submit_errors() {
+        assert_eq!(
+            classify_failover_error("提交图片生成被拒绝（PUBLIC_ERROR_USER_QUOTA_REACHED）"),
+            Some(FailoverKind::Quota)
+        );
+        assert_eq!(
+            classify_failover_error("提交文生视频被拒绝（PUBLIC_ERROR_UNUSUAL_ACTIVITY）"),
+            Some(FailoverKind::Risk)
+        );
+        assert_eq!(
+            classify_failover_error("提交文生视频被拒绝（PUBLIC_ERROR_MODEL_ACCESS_DENIED）"),
+            Some(FailoverKind::ModelAccess)
+        );
+        assert_eq!(
+            classify_failover_error("生成超时，Flow 可能仍在执行；PUBLIC_ERROR_UNUSUAL_ACTIVITY"),
+            None
+        );
+        assert_eq!(
+            classify_failover_error("轮询视频生成状态被拒绝（PUBLIC_ERROR_RATE_LIMIT_EXCEEDED）"),
+            None
+        );
+        assert_eq!(
+            classify_failover_error("提交图片生成被拒绝（PUBLIC_ERROR_UNSAFE_GENERATION）"),
+            None
+        );
+    }
+
+    #[test]
+    fn progressive_risk_cooldown_escalates_and_never_shortens_existing_cooldown() {
+        assert_eq!(risk_cooldown_minutes(1), 5);
+        assert_eq!(risk_cooldown_minutes(2), 15);
+        assert_eq!(risk_cooldown_minutes(3), 45);
+        assert_eq!(risk_cooldown_minutes(4), 60);
+        assert_eq!(risk_cooldown_minutes(10), 60);
+
+        let mut account = Account {
+            id: "a1".into(),
+            email: "a1@example.test".into(),
+            ..Account::default()
+        };
+        apply_account_failure(
+            &mut account,
+            "提交图片生成被拒绝（PUBLIC_ERROR_UNUSUAL_ACTIVITY）",
+            Some(FailoverKind::Risk),
+        );
+        assert_eq!(account.consecutive_failures, 1);
+        assert!(account.temporarily_disabled());
+        assert!(account
+            .disabled_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("5 分钟"));
+
+        let far_future = after_minutes(180);
+        account.disabled_until = Some(far_future.clone());
+        account.disabled_reason = Some("手动禁用 3 小时".into());
+        apply_account_failure(
+            &mut account,
+            "提交图片生成被拒绝（PUBLIC_ERROR_UNUSUAL_ACTIVITY）",
+            Some(FailoverKind::Risk),
+        );
+        assert_eq!(account.consecutive_failures, 2);
+        assert_eq!(account.disabled_until.as_deref(), Some(far_future.as_str()));
+        assert_eq!(account.disabled_reason.as_deref(), Some("手动禁用 3 小时"));
+
+        let mut model_denied = Account {
+            id: "a2".into(),
+            email: "a2@example.test".into(),
+            ..Account::default()
+        };
+        apply_account_failure(
+            &mut model_denied,
+            "提交文生视频被拒绝（PUBLIC_ERROR_MODEL_ACCESS_DENIED）",
+            Some(FailoverKind::ModelAccess),
+        );
+        assert!(!model_denied.temporarily_disabled());
+        assert!(
+            summarize_failure_stage("提交图片生成", "PUBLIC_ERROR_UNUSUAL_ACTIVITY")
+                .contains("账号触发上游风控拦截")
+        );
+        assert!(
+            summarize_failure_stage("提交图片生成", "PUBLIC_ERROR_USER_QUOTA_REACHED")
+                .contains("账号积分不足或超额")
+        );
+    }
+
+    #[test]
+    fn pick_ready_account_excludes_failed_and_cooled_accounts() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let app = App::open(directory.path())?;
+        let mut a1 = Account {
+            id: "a1".into(),
+            email: "a1@example.test".into(),
+            enabled: true,
+            last_synced: Some(now()),
+            priority: 100,
+            ..Account::default()
+        };
+        let a2 = Account {
+            id: "a2".into(),
+            email: "a2@example.test".into(),
+            enabled: true,
+            last_synced: Some(now()),
+            priority: 10,
+            ..Account::default()
+        };
+        let a3 = Account {
+            id: "a3".into(),
+            email: "a3@example.test".into(),
+            enabled: true,
+            last_synced: Some(now()),
+            priority: 50,
+            video_enabled: false,
+            ..Account::default()
+        };
+        app.store.save_account(&a1)?;
+        app.store.save_account(&a2)?;
+        app.store.save_account(&a3)?;
+
+        let mut excluded = HashSet::new();
+        assert_eq!(
+            app.pick_ready_account(true, &excluded)?.map(|a| a.id),
+            Some("a1".into())
+        );
+        excluded.insert("a1".into());
+        // a3 has video_enabled=false, so failover for video skips directly to a2
+        assert_eq!(
+            app.pick_ready_account(true, &excluded)?.map(|a| a.id),
+            Some("a2".into())
+        );
+        // After a1 cools down, it's also skipped without explicit exclusion
+        a1.disabled_until = Some(after_minutes(15));
+        app.store.save_account(&a1)?;
+        assert_eq!(
+            app.pick_ready_account(true, &HashSet::new())?.map(|a| a.id),
+            Some("a2".into())
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     #[ignore = "requires the local Postman media simulation and FLOW2API_MEDIA_SIM_URL"]
     async fn media_transport_simulation() -> Result<()> {
