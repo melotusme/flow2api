@@ -1,15 +1,109 @@
 use crate::model::*;
 use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
     sync::Mutex,
+    time::Duration,
 };
+
+const SCHEMA_VERSION: i64 = 3;
+const ASSET_PREFIX: &str = "asset://";
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct TaskStateCounts {
+    pub queued: usize,
+    pub running: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+}
 
 pub struct Store {
     pub(crate) connection: Mutex<Connection>,
     pub root: PathBuf,
-    _instance: std::fs::File,
+    instance: Mutex<Option<std::fs::File>>,
+}
+
+fn acquire_instance_lock(root: &Path, attempts: usize) -> Result<std::fs::File> {
+    let lock_path = root.join("instance.lock");
+    for attempt in 0..attempts {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
+        if file.try_lock().is_ok() {
+            return Ok(file);
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    bail!("该数据目录已被另一个 Flow2API 实例使用")
+}
+
+fn externalize_task_images(connection: &Connection, task: &Task) -> Result<Task> {
+    let mut stored = task.clone();
+    for image in &mut stored.request.images {
+        if image.starts_with("data:image/") {
+            let hash = format!("{:x}", Sha256::digest(image.as_bytes()));
+            connection.execute(
+                "INSERT OR IGNORE INTO task_assets(hash, data) VALUES(?1, ?2)",
+                params![hash, image.as_str()],
+            )?;
+            *image = format!("{ASSET_PREFIX}{hash}");
+        }
+    }
+    Ok(stored)
+}
+
+fn hydrate_task_images(connection: &Connection, task: &mut Task) -> Result<()> {
+    for image in &mut task.request.images {
+        if let Some(hash) = image.strip_prefix(ASSET_PREFIX) {
+            if let Some(data) = connection
+                .query_row(
+                    "SELECT data FROM task_assets WHERE hash=?1",
+                    [hash],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+            {
+                *image = data;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Move inline base64 reference images out of `tasks.value` into content-addressed
+/// `task_assets` rows so task summaries and status queries never scan hundreds of MB.
+fn migrate_inline_task_assets(connection: &mut Connection) -> Result<usize> {
+    let ids: Vec<String> = {
+        let mut statement =
+            connection.prepare("SELECT id FROM tasks WHERE value LIKE '%data:image/%'")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    let mut reclaimed = 0usize;
+    let tx = connection.transaction()?;
+    for id in ids {
+        let raw: String =
+            tx.query_row("SELECT value FROM tasks WHERE id=?1", [&id], |r| r.get(0))?;
+        let Ok(task) = serde_json::from_str::<Task>(&raw) else {
+            continue;
+        };
+        let stored = externalize_task_images(&tx, &task)?;
+        let compact = serde_json::to_string(&stored)?;
+        reclaimed = reclaimed.saturating_add(raw.len().saturating_sub(compact.len()));
+        tx.execute(
+            "UPDATE tasks SET value=?2 WHERE id=?1",
+            params![id, compact],
+        )?;
+    }
+    tx.execute_batch(&format!("PRAGMA user_version={SCHEMA_VERSION};"))?;
+    tx.commit()?;
+    Ok(reclaimed)
 }
 
 impl Store {
@@ -20,35 +114,37 @@ impl Store {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
         }
-        let instance = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(root.join("instance.lock"))?;
-        instance
-            .try_lock()
-            .context("该数据目录已被另一个 Flow2API 实例使用")?;
+        // Retry briefly so an updating process releasing its lock during restart never races startup.
+        let instance = acquire_instance_lock(root, 25)?;
         std::fs::create_dir_all(root.join("generated"))?;
         std::fs::create_dir_all(root.join("profiles"))?;
-        let connection = Connection::open(root.join("desktop.db"))?;
+        let mut connection = Connection::open(root.join("desktop.db"))?;
         let schema: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if schema > 2 {
+        if schema > SCHEMA_VERSION {
             bail!("数据库由较新版本创建，请升级应用；没有修改原数据库");
         }
-        connection.busy_timeout(std::time::Duration::from_secs(10))?;
-        connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+        connection.busy_timeout(Duration::from_secs(10))?;
+        connection.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
             CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS browser_connections (account_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE);
             CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS task_assets (hash TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS media (filename TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS legacy_records (id TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS migration_runs (id TEXT PRIMARY KEY, value TEXT NOT NULL);
-            PRAGMA user_version=2;")?;
+            CREATE TABLE IF NOT EXISTS migration_runs (id TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )?;
+        if schema < SCHEMA_VERSION {
+            let reclaimed = migrate_inline_task_assets(&mut connection)?;
+            if reclaimed >= 4 * 1024 * 1024 {
+                let _ = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
+            }
+        }
         let store = Self {
             connection: Mutex::new(connection),
             root: root.to_owned(),
-            _instance: instance,
+            instance: Mutex::new(Some(instance)),
         };
         if store
             .connection
@@ -60,16 +156,35 @@ impl Store {
             store.save_settings(&Settings::default())?;
         }
         // A process restart cannot prove an accepted upstream request failed. Never resubmit it automatically.
-        for mut task in store.tasks()? {
-            if task.state == "queued" || task.state == "running" {
-                task.state = "interrupted".into();
-                task.stage = "进程退出，需核对 Flow 中的任务结果".into();
-                task.error = Some("上次运行被中断；为避免重复扣费，没有自动重试".into());
-                task.updated_at = now();
-                store.save_task(&task)?;
-            }
+        let active_ids: Vec<String> = {
+            let connection = store.connection.lock().unwrap();
+            let mut statement = connection.prepare(
+                "SELECT id FROM tasks WHERE json_extract(value, '$.state') IN ('queued', 'running')",
+            )?;
+            let rows = statement.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        for id in active_ids {
+            let mut task = store.task(&id)?;
+            task.state = "interrupted".into();
+            task.stage = "进程退出，需核对 Flow 中的任务结果".into();
+            task.error = Some("上次运行被中断；为避免重复扣费，没有自动重试".into());
+            task.updated_at = now();
+            store.save_task(&task)?;
         }
         Ok(store)
+    }
+    /// Release the data-directory instance lock immediately before handing off to a restarted process.
+    pub fn release_instance_lock(&self) {
+        self.instance.lock().unwrap().take();
+    }
+    /// Reacquire the data-directory lock if an update restart is aborted and this process resumes.
+    pub fn reacquire_instance_lock(&self) -> Result<()> {
+        let mut slot = self.instance.lock().unwrap();
+        if slot.is_none() {
+            *slot = Some(acquire_instance_lock(&self.root, 5)?);
+        }
+        Ok(())
     }
     pub fn settings(&self) -> Result<Settings> {
         let value: String = self.connection.lock().unwrap().query_row(
@@ -259,23 +374,61 @@ impl Store {
         Ok(())
     }
     pub fn tasks(&self) -> Result<Vec<Task>> {
-        let mut tasks: Vec<Task> = self.read_values("SELECT value FROM tasks")?;
+        let connection = self.connection.lock().unwrap();
+        let mut statement = connection.prepare("SELECT value FROM tasks")?;
+        let rows = statement.query_map([], |r| r.get::<_, String>(0))?;
+        let mut tasks = Vec::new();
+        for row in rows {
+            let mut task: Task = serde_json::from_str(&row?)?;
+            hydrate_task_images(&connection, &mut task)?;
+            tasks.push(task);
+        }
         tasks.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(tasks)
     }
-    /// Keep large reference images in SQLite until a caller opens task details.
+    /// Keep large reference images in `task_assets` until a caller opens task details.
     pub fn task_summaries(&self) -> Result<Vec<Task>> {
         self.read_values("SELECT json_set(value, '$.request.images', json('[]')) FROM tasks ORDER BY json_extract(value, '$.created_at') DESC, id")
+    }
+    pub fn task_state_counts(&self) -> Result<TaskStateCounts> {
+        let connection = self.connection.lock().unwrap();
+        let mut statement = connection
+            .prepare("SELECT json_extract(value, '$.state'), COUNT(*) FROM tasks GROUP BY 1")?;
+        let rows = statement.query_map([], |r| {
+            Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let mut counts = TaskStateCounts::default();
+        for row in rows {
+            let (state, count) = row?;
+            let count = usize::try_from(count).unwrap_or(0);
+            match state.as_deref() {
+                Some("queued") => counts.queued = count,
+                Some("running") => counts.running = count,
+                Some("succeeded") => counts.succeeded = count,
+                Some("failed" | "interrupted") => counts.failed += count,
+                _ => {}
+            }
+        }
+        Ok(counts)
     }
     pub fn task(&self, id: &str) -> Result<Task> {
         let connection = self.connection.lock().unwrap();
         let mut statement = connection.prepare("SELECT value FROM tasks WHERE id=?1")?;
         let mut rows = statement.query([id])?;
         let row = rows.next()?.context("任务不存在")?;
-        Ok(serde_json::from_str(&row.get::<_, String>(0)?)?)
+        let mut task: Task = serde_json::from_str(&row.get::<_, String>(0)?)?;
+        hydrate_task_images(&connection, &mut task)?;
+        Ok(task)
     }
     pub fn save_task(&self, task: &Task) -> Result<()> {
-        self.connection.lock().unwrap().execute("INSERT INTO tasks(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value", params![task.id, serde_json::to_string(task)?])?;
+        let mut connection = self.connection.lock().unwrap();
+        let tx = connection.transaction()?;
+        let stored = externalize_task_images(&tx, task)?;
+        tx.execute(
+            "INSERT INTO tasks(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+            params![stored.id, serde_json::to_string(&stored)?],
+        )?;
+        tx.commit()?;
         Ok(())
     }
     pub fn media(&self) -> Result<Vec<Media>> {
@@ -387,9 +540,69 @@ mod tests {
                 .lock()
                 .unwrap()
                 .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
-            2
+            SCHEMA_VERSION
         );
         assert!(crate::migration::reports(&upgraded)?.is_empty());
+        Ok(())
+    }
+    #[test]
+    fn schema_three_deduplicates_inline_images_and_hydrates_on_read() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(directory.path())?;
+        let image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        let make_task = |id: &str, state: &str| Task {
+            id: id.into(),
+            request: GenerationRequest {
+                model: "gemini-3.1-flash-lite-image-square".into(),
+                prompt: "dedupe test".into(),
+                images: vec![image.into()],
+                account_id: None,
+                video_id: None,
+            },
+            state: state.into(),
+            stage: "done".into(),
+            created_at: now(),
+            updated_at: now(),
+            error: None,
+            results: vec![],
+        };
+        // Simulate legacy v2 rows storing raw data URIs inline.
+        {
+            let conn = store.connection.lock().unwrap();
+            for (id, state) in [("t1", "succeeded"), ("t2", "failed")] {
+                conn.execute(
+                    "INSERT INTO tasks(id,value) VALUES(?1,?2)",
+                    params![id, serde_json::to_string(&make_task(id, state))?],
+                )?;
+            }
+            conn.execute_batch("PRAGMA user_version=2;")?;
+        }
+        drop(store);
+
+        let migrated = Store::open(directory.path())?;
+        assert_eq!(migrated.task("t1")?.request.images, vec![image]);
+        assert_eq!(migrated.task("t2")?.request.images, vec![image]);
+        assert!(migrated.task_summaries()?[0].request.images.is_empty());
+        let counts = migrated.task_state_counts()?;
+        assert_eq!(counts.succeeded, 1);
+        assert_eq!(counts.failed, 1);
+        // Only one deduplicated asset row should exist, and tasks.value should not store raw base64.
+        let conn = migrated.connection.lock().unwrap();
+        let asset_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM task_assets", [], |r| r.get(0))?;
+        let inline_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE value LIKE '%data:image/%'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(asset_count, 1);
+        assert_eq!(inline_count, 0);
+        drop(conn);
+        // Release/reacquire handoff works cleanly for updater restarts.
+        migrated.release_instance_lock();
+        let other = Store::open(directory.path())?;
+        drop(other);
+        migrated.reacquire_instance_lock()?;
         Ok(())
     }
 }

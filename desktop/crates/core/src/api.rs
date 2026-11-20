@@ -587,7 +587,8 @@ async fn poll_browser(
             "浏览器连接已失效，请重新连接".into(),
         )
     })?;
-    if payload.resume || !peer.online() {
+    let was_online = peer.online();
+    if payload.resume || !was_online {
         peer.revalidate();
     }
     peer.touch();
@@ -596,17 +597,21 @@ async fn poll_browser(
     } else {
         peer.poll(payload.result).await
     };
+    let mut needs_refresh = !was_online || payload.resume;
     if !peer
         .validating
         .swap(true, std::sync::atomic::Ordering::SeqCst)
     {
+        needs_refresh = true;
         let app = app.clone();
         let peer = peer.clone();
         tokio::spawn(async move {
             app.validate_browser(peer).await;
         });
     }
-    app.refresh()?;
+    if needs_refresh {
+        app.refresh()?;
+    }
     Ok(Json(
         json!({"commands":commands,"connection":peer.status()}),
     ))

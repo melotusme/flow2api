@@ -1,6 +1,6 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-const APP_VERSION='0.3.7';
+let APP_VERSION='0.3.8';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
 const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
@@ -1047,6 +1047,7 @@ async function reloadSettings(){
     const input=$('settings-form').elements.namedItem(key);
     if(input){if(input.type==='checkbox')input.checked=Boolean(value);else input.value=value;}
   }
+  if($('auto-update'))$('auto-update').checked=Boolean(state.settings.auto_update);
   $('base-url').textContent=`http://127.0.0.1:${state.settings.port}/v1`;
   await loadMagpie();
 }
@@ -1199,14 +1200,15 @@ $('settings-form').onsubmit=event=>{
   action(event.submitter,async()=>{
     const form=new FormData(event.currentTarget);
     const settings=Object.fromEntries(form);
-    settings.auto_update=form.has('auto_update');
+    settings.auto_update=Boolean($('auto-update')?.checked??state.settings?.auto_update??true);
     for(const name of ['port','max_concurrent','image_timeout_seconds','video_timeout_seconds'])settings[name]=Number(settings[name]);
+    const portChanged=state.settings&&state.settings.port!==settings.port;
     await invoke('save_settings',{settings});
     state.settings=settings;
     $('base-url').textContent=`http://127.0.0.1:${settings.port}/v1`;
     await loadMagpie();
     await refresh();
-    notice(state.status?.service==='running'?'设置已保存并自动重启 API 生效。':'设置已保存。');
+    notice(portChanged&&state.status?.service==='running'?'设置已保存并已在新端口重启 API 生效。':'设置已保存并立即生效。');
   });
 };
 
@@ -1258,16 +1260,95 @@ for(const [id,name] of [['webdav-test','test'],['webdav-push','push'],['webdav-p
   });
 }
 
-function renderUpdateStatus(status){
-  if(!status?.message)return;
-  const checked=status.checked_at?` 上次检查：${new Date(status.checked_at*1000).toLocaleString()}。`:'';
-  $('update-status').textContent=status.message+checked;
-  const dialogStatus=document.getElementById('dialog-update-status');
-  if(dialogStatus)dialogStatus.textContent=status.message+checked;
-  if($('update-badge'))$('update-badge').textContent=({error:'更新失败',checking:'检查中',current:'已是最新',available:'有新版本',waiting:'等待空闲',downloading:'下载中',installing:'安装中'})[status.phase]||'检查更新';
+let pendingUpdate=null;
+let latestUpdateStatus=null;
+
+function syncVersionLabels(version){
+  if(!version)return;
+  APP_VERSION=version;
+  if($('aside-version'))$('aside-version').textContent=`v${version}`;
+  if($('settings-current-version'))$('settings-current-version').textContent=`v${version}`;
+  if($('footer-version'))$('footer-version').textContent=`Flow2API Desktop v${version} · Rust + Tauri`;
+  const dialogVer=document.getElementById('dialog-current-version');
+  if(dialogVer)dialogVer.textContent=`当前运行版本：v${version}`;
 }
 
-let pendingUpdate=null;
+function renderUpdateStatus(status){
+  if(!status)return;
+  latestUpdateStatus=status;
+  if(status.current_version)syncVersionLabels(status.current_version);
+  if(typeof status.auto_update==='boolean'&&$('auto-update'))$('auto-update').checked=status.auto_update;
+  if(state.settings&&typeof status.auto_update==='boolean')state.settings.auto_update=status.auto_update;
+  const hasAvailable=Boolean(status.available_version);
+  if(hasAvailable){
+    pendingUpdate={version:status.available_version,current_version:status.current_version||APP_VERSION,body:status.notes||'',downloaded:Boolean(status.downloaded)};
+  }else if(status.phase==='current'){
+    pendingUpdate=null;
+  }
+  const checked=status.checked_at?` 上次检查：${new Date(status.checked_at*1000).toLocaleString()}。`:'';
+  const text=(status.message||'从公开的 GitHub Release 检查更新，无需登录。')+checked;
+  $('update-status').textContent=text;
+  const dialogStatus=document.getElementById('dialog-update-status');
+  if(dialogStatus)dialogStatus.textContent=text;
+  const dialogNotes=document.getElementById('dialog-update-notes');
+  if(dialogNotes){
+    if(status.notes){
+      dialogNotes.textContent=status.notes;
+      dialogNotes.style.display='block';
+    }else if(!hasAvailable){
+      dialogNotes.style.display='none';
+    }
+  }
+  const installLabel=status.phase==='installing'
+    ?`正在安装 v${status.available_version||''}…`
+    :status.downloaded
+      ?`立即安装 v${status.available_version} 并重启`
+      :`下载并安装 v${status.available_version||''}`;
+  $('install-update').hidden=!hasAvailable;
+  $('install-update').textContent=installLabel;
+  $('install-update').disabled=status.phase==='installing'||status.phase==='downloading';
+  const dialogInstall=document.getElementById('dialog-install-btn');
+  if(dialogInstall){
+    dialogInstall.style.display=hasAvailable?'inline-block':'none';
+    dialogInstall.textContent=installLabel;
+    dialogInstall.disabled=status.phase==='installing'||status.phase==='downloading';
+  }
+  if($('update-badge')){
+    $('update-badge').textContent=({
+      error:'更新失败',
+      checking:'检查中',
+      current:'已是最新',
+      available:`可升级 v${status.available_version||''}`,
+      downloading:'后台下载中',
+      ready:`已就绪 v${status.available_version||''}`,
+      waiting:'等待空闲安装',
+      installing:'安装中',
+    })[status.phase]||'检查更新';
+  }
+  const navUpdateLabel=status.downloaded&&status.available_version
+    ?`安装 v${status.available_version} ↗`
+    :status.available_version
+      ?`新版本 v${status.available_version} ↗`
+      :'检查更新 ↗';
+  if($('header-check-update'))$('header-check-update').textContent=navUpdateLabel;
+  if($('sidebar-check-update'))$('sidebar-check-update').textContent=navUpdateLabel;
+}
+
+if($('auto-update'))$('auto-update').onchange=async()=>{
+  const want=$('auto-update').checked;
+  $('auto-update').disabled=true;
+  try{
+    const actual=await invoke('set_auto_update',{enabled:want});
+    $('auto-update').checked=actual;
+    if(state.settings)state.settings.auto_update=actual;
+    notice(actual?'已开启自动后台更新，发现新版本将在任务空闲时自动升级。':'已关闭自动后台更新，仍可随时手动检查。');
+  }catch(error){
+    $('auto-update').checked=!want;
+    notice(error,true);
+  }finally{
+    $('auto-update').disabled=false;
+  }
+};
 
 function showUpdateDialog(autoCheck=false){
   const previousFocus=document.activeElement;
@@ -1280,7 +1361,9 @@ function showUpdateDialog(autoCheck=false){
     const headingWrap=node('div');
     const title=node('h2','软件版本与更新');
     title.id='update-dialog-title';
-    headingWrap.append(title,node('p',`当前运行版本：v${APP_VERSION}`,'hint'));
+    const verLine=node('p',`当前运行版本：v${APP_VERSION}`,'hint');
+    verLine.id='dialog-current-version';
+    headingWrap.append(title,verLine);
     const closeBtn=button('关闭',()=>dialog.close(),'quiet');
     closeBtn.style.fontSize='16px';
     header.append(headingWrap,closeBtn);
@@ -1307,6 +1390,7 @@ function showUpdateDialog(autoCheck=false){
     dialog.addEventListener('close',()=>{dialog.remove();previousFocus?.focus?.();},{once:true});
     document.body.append(dialog);
   }
+  if(latestUpdateStatus)renderUpdateStatus(latestUpdateStatus);
   dialog.showModal();
   if(autoCheck)runUpdateCheck(document.getElementById('dialog-check-btn'));
 }
@@ -1342,13 +1426,14 @@ async function runUpdateCheck(triggerBtn){
       notice(msg);
       return;
     }
-    const msg=`发现新版本 v${found.version}（当前 v${found.current_version||APP_VERSION}）。`;
+    const msg=found.downloaded
+      ?`新版本 v${found.version} 已在后台下载并验签，可立即安装并重启。`
+      :`发现新版本 v${found.version}（当前 v${found.current_version||APP_VERSION}）。`;
     setStatus(msg,found.body||'');
     $('install-update').hidden=false;
     const dialogInstall=document.getElementById('dialog-install-btn');
     if(dialogInstall)dialogInstall.style.display='inline-block';
-    if($('update-badge'))$('update-badge').textContent=`可升级至 v${found.version}`;
-    notice(`发现新版本 v${found.version}，可立即更新。`);
+    notice(found.downloaded?`新版本 v${found.version} 已就绪，点击即可安装重启。`:`发现新版本 v${found.version}，可立即更新。`);
   }catch(err){
     const msg='检查更新失败：'+(err?.message||err);
     setStatus(msg);
@@ -1359,8 +1444,8 @@ async function runUpdateCheck(triggerBtn){
 }
 
 async function runInstallUpdate(triggerBtn){
-  if(!pendingUpdate)throw Error('请先检查新版本');
-  action(triggerBtn||$('install-update'),async()=>{
+  if(!pendingUpdate&&!latestUpdateStatus?.available_version)throw Error('请先检查新版本');
+  return action(triggerBtn||$('install-update'),async()=>{
     await invoke('install_update');
     notice('更新包下载校验完成，正在重启应用……');
   });
@@ -1368,8 +1453,12 @@ async function runInstallUpdate(triggerBtn){
 
 $('check-update').onclick=()=>runUpdateCheck($('check-update'));
 $('install-update').onclick=()=>runInstallUpdate($('install-update'));
-if($('header-check-update'))$('header-check-update').onclick=()=>showUpdateDialog(true);
-if($('sidebar-check-update'))$('sidebar-check-update').onclick=()=>showUpdateDialog(true);
+function openUpdateFromNav(){
+  const alreadyFound=Boolean(latestUpdateStatus?.available_version)||['downloading','installing'].includes(latestUpdateStatus?.phase);
+  showUpdateDialog(!alreadyFound);
+}
+if($('header-check-update'))$('header-check-update').onclick=openUpdateFromNav;
+if($('sidebar-check-update'))$('sidebar-check-update').onclick=openUpdateFromNav;
 
 (async()=>{
   try{
@@ -1377,7 +1466,7 @@ if($('sidebar-check-update'))$('sidebar-check-update').onclick=()=>showUpdateDia
     await window.__TAURI__.event.listen('status',event=>updateStatus(event.payload));
     await window.__TAURI__.event.listen('notice',event=>notice(event.payload,String(event.payload).startsWith('无法')));
     await window.__TAURI__.event.listen('account-synced',()=>{refresh().catch(()=>{});});
-    await window.__TAURI__.event.listen('check_update',()=>{showUpdateDialog(true);});
+    await window.__TAURI__.event.listen('check_update',()=>{openUpdateFromNav();});
     await window.__TAURI__.event.listen('update-progress',event=>{
       const received=event.payload.received,total=event.payload.total;
       const msg=total?`已下载 ${(received/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB (${Math.round(received/total*100)}%)`:`已下载 ${(received/1048576).toFixed(1)} MB`;
@@ -1400,12 +1489,33 @@ if($('sidebar-check-update'))$('sidebar-check-update').onclick=()=>showUpdateDia
     $('platform').textContent=navigator.userAgent.includes('Mac')?'macOS · 菜单栏运行':navigator.userAgent.includes('Windows')?'Windows · 托盘运行':'Linux · 托盘运行';
     await refresh();
     loadDevice().catch(error=>notice('设备设置读取失败：'+error,true));
-    let polling=false;
-    setInterval(async()=>{
-      if(polling)return;
-      polling=true;
-      try{await refresh()}catch(error){notice(error,true)}finally{polling=false}
-    },4000);
+    let polling=false,pollTimer=null;
+    function schedulePoll(){
+      clearTimeout(pollTimer);
+      if(document.hidden)return;
+      const active=(state.status?.running||0)+(state.status?.queued||0)>0||state.page==='accounts'||state.page==='tasks';
+      pollTimer=setTimeout(async()=>{
+        if(document.hidden){schedulePoll();return;}
+        if(!polling){
+          polling=true;
+          try{await refresh();}catch(error){notice(error,true);}finally{polling=false;}
+        }
+        schedulePoll();
+      },active?4000:12000);
+    }
+    document.addEventListener('visibilitychange',()=>{
+      if(!document.hidden){
+        if(!polling){
+          polling=true;
+          refresh().catch(error=>notice(error,true)).finally(()=>{polling=false;schedulePoll();});
+        }else{
+          schedulePoll();
+        }
+      }else{
+        clearTimeout(pollTimer);
+      }
+    });
+    schedulePoll();
   }catch(error){
     notice(error,true);
   }

@@ -101,7 +101,7 @@ impl App {
         self.updates.send_replace(status.clone());
     }
     pub fn refresh(&self) -> Result<()> {
-        let tasks = self.store.task_summaries()?;
+        let counts = self.store.task_state_counts()?;
         let accounts = self.store.accounts()?;
         self.change_status(|s| {
             s.total_accounts = accounts.len();
@@ -114,13 +114,10 @@ impl App {
                         && (!a.browser_bridge || self.bridge.ready(&a.id))
                 })
                 .count();
-            s.queued = tasks.iter().filter(|t| t.state == "queued").count();
-            s.running = tasks.iter().filter(|t| t.state == "running").count();
-            s.succeeded = tasks.iter().filter(|t| t.state == "succeeded").count();
-            s.failed = tasks
-                .iter()
-                .filter(|t| t.state == "failed" || t.state == "interrupted")
-                .count();
+            s.queued = counts.queued;
+            s.running = counts.running;
+            s.succeeded = counts.succeeded;
+            s.failed = counts.failed;
         });
         Ok(())
     }
@@ -246,6 +243,13 @@ impl App {
             self.workers.forget_permits(old - new);
         }
     }
+    pub fn set_auto_update(&self, enabled: bool) -> Result<bool> {
+        self.ensure_available()?;
+        let mut settings = self.store.settings()?;
+        settings.auto_update = enabled;
+        self.store.save_settings(&settings)?;
+        Ok(settings.auto_update)
+    }
     pub async fn save_settings(self: &Arc<Self>, settings: Settings) -> Result<()> {
         let admission = self.job_gate.lock().await;
         self.ensure_available()?;
@@ -257,16 +261,21 @@ impl App {
         }
         let previous = self.store.settings()?;
         let old = previous.max_concurrent;
+        let port_changed = previous.port != settings.port;
+        let browser_changed = previous.browser_executable != settings.browser_executable;
+        let proxy_changed = previous.proxy_url != settings.proxy_url;
         self.store.save_settings(&settings)?;
         self.sync_workers(old, settings.max_concurrent);
         let was_running = self.status().service == "running";
-        if was_running {
+        if was_running && port_changed {
             self.stop_service_locked(admission).await?;
         } else {
             drop(admission);
         }
-        self.browsers.close_all().await;
-        if previous.browser_executable != settings.browser_executable {
+        if browser_changed || proxy_changed {
+            self.browsers.close_all().await;
+        }
+        if browser_changed {
             for mut account in self.store.accounts()? {
                 account.last_synced = None;
                 account.credits = None;
@@ -274,7 +283,7 @@ impl App {
             }
             self.refresh()?;
         }
-        if was_running {
+        if was_running && port_changed {
             self.start_service().await?;
         }
         Ok(())

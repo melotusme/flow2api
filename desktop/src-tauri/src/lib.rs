@@ -22,6 +22,33 @@ struct Desktop {
     quit_in_progress: AtomicBool,
     webdav: tokio::sync::Mutex<()>,
     autostart_item: Mutex<Option<CheckMenuItem<tauri::Wry>>>,
+    auto_update_item: Mutex<Option<CheckMenuItem<tauri::Wry>>>,
+    update_menu_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+}
+
+pub(crate) fn sync_update_tray(app: &tauri::AppHandle, status: &updates::UpdateStatus) {
+    let Some(desktop) = app.try_state::<Desktop>() else {
+        return;
+    };
+    if let Ok(slot) = desktop.auto_update_item.lock() {
+        if let Some(item) = slot.as_ref() {
+            let _ = item.set_checked(status.auto_update);
+        }
+    }
+    if let Ok(slot) = desktop.update_menu_item.lock() {
+        if let Some(item) = slot.as_ref() {
+            let text = match (status.phase.as_str(), status.available_version.as_deref()) {
+                ("checking", _) => "正在检查更新…".to_string(),
+                ("downloading", Some(v)) => format!("正在后台下载 v{v}…"),
+                ("ready", Some(v)) => format!("安装新版本 v{v} 并重启…"),
+                ("waiting", Some(v)) => format!("v{v} 已就绪（等待空闲安装）"),
+                ("available", Some(v)) => format!("发现新版本 v{v}…"),
+                ("installing", Some(v)) => format!("正在安装 v{v}…"),
+                _ => "检查更新…".to_string(),
+            };
+            let _ = item.set_text(text);
+        }
+    };
 }
 fn result<T>(core: &App, value: anyhow::Result<T>) -> Result<T, String> {
     value.map_err(|error| {
@@ -43,8 +70,22 @@ fn settings(state: tauri::State<Desktop>) -> Result<Settings, String> {
     result(&state.core, state.core.store.settings())
 }
 #[tauri::command]
-async fn save_settings(state: tauri::State<'_, Desktop>, settings: Settings) -> Result<(), String> {
-    result(&state.core, state.core.save_settings(settings).await)
+async fn save_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Desktop>,
+    settings: Settings,
+) -> Result<(), String> {
+    let auto_update = settings.auto_update;
+    result(&state.core, state.core.save_settings(settings).await)?;
+    if let Ok(slot) = state.auto_update_item.lock() {
+        if let Some(item) = slot.as_ref() {
+            let _ = item.set_checked(auto_update);
+        }
+    }
+    if auto_update {
+        updates::wake(&app);
+    }
+    Ok(())
 }
 #[tauri::command]
 fn magpie_status(
@@ -727,16 +768,20 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(autostart.arg("--autostart").build())
         .setup(|app| {
-            let core = App::open(&app.path().app_data_dir()?)?;
+            let data_dir = app.path().app_data_dir()?;
+            let background_restart = updates::consume_background_restart(&data_dir);
+            let core = App::open(&data_dir)?;
             let status = core.status();
+            let auto_update_now = core.store.settings().map(|s| s.auto_update).unwrap_or(true);
             app.manage(Desktop {
                 core: core.clone(),
                 quitting: AtomicBool::new(false),
                 quit_in_progress: AtomicBool::new(false),
                 webdav: tokio::sync::Mutex::new(()),
                 autostart_item: Mutex::new(None),
+                auto_update_item: Mutex::new(None),
+                update_menu_item: Mutex::new(None),
             });
-            updates::start(app.handle().clone());
             let autostart_now = app.autolaunch().is_enabled();
             let summary =
                 MenuItem::with_id(app, "summary", status.tray_summary(), false, None::<&str>)?;
@@ -744,6 +789,16 @@ pub fn run() {
             let browser = MenuItem::with_id(app, "browser", "Chrome 未连接", false, None::<&str>)?;
             let error = MenuItem::with_id(app, "error", "最近错误：无", false, None::<&str>)?;
             let toggle = MenuItem::with_id(app, "toggle", "启动 API 服务", true, None::<&str>)?;
+            let check_update_item =
+                MenuItem::with_id(app, "check_update", "检查更新…", true, None::<&str>)?;
+            let auto_update_item = CheckMenuItem::with_id(
+                app,
+                "auto_update",
+                "自动后台更新",
+                true,
+                auto_update_now,
+                None::<&str>,
+            )?;
             let autostart_item = CheckMenuItem::with_id(
                 app,
                 "autostart",
@@ -752,7 +807,13 @@ pub fn run() {
                 autostart_now.unwrap_or(false),
                 None::<&str>,
             )?;
-            *app.state::<Desktop>().autostart_item.lock().unwrap() = Some(autostart_item.clone());
+            {
+                let desktop = app.state::<Desktop>();
+                *desktop.autostart_item.lock().unwrap() = Some(autostart_item.clone());
+                *desktop.auto_update_item.lock().unwrap() = Some(auto_update_item.clone());
+                *desktop.update_menu_item.lock().unwrap() = Some(check_update_item.clone());
+            }
+            updates::start(app.handle().clone());
             let menu = Menu::with_items(
                 app,
                 &[
@@ -764,7 +825,8 @@ pub fn run() {
                     &MenuItem::with_id(app, "show", "打开 Flow2API", true, None::<&str>)?,
                     &toggle,
                     &MenuItem::with_id(app, "data", "打开数据目录", true, None::<&str>)?,
-                    &MenuItem::with_id(app, "check_update", "检查更新…", true, None::<&str>)?,
+                    &check_update_item,
+                    &auto_update_item,
                     &autostart_item,
                     &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(app, "quit", "退出 Flow2API", true, None::<&str>)?,
@@ -787,6 +849,32 @@ pub fn run() {
                     "check_update" => {
                         present(app);
                         let _ = app.emit("check_update", ());
+                    }
+                    "auto_update" => {
+                        let desktop = app.state::<Desktop>();
+                        let current = desktop
+                            .core
+                            .store
+                            .settings()
+                            .map(|s| s.auto_update)
+                            .unwrap_or(true);
+                        match desktop.core.set_auto_update(!current) {
+                            Ok(actual) => {
+                                let status = updates::update_status(
+                                    app.clone(),
+                                    app.state::<updates::State>(),
+                                );
+                                sync_update_tray(app, &status);
+                                let _ = app.emit("update-status", status);
+                                if actual {
+                                    updates::wake(app);
+                                }
+                            }
+                            Err(error) => {
+                                let _ = app.emit("notice", error.to_string());
+                                present(app);
+                            }
+                        }
                     }
                     "quit" => request_quit(app),
                     "autostart" => {
@@ -897,7 +985,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let _ = core.start_service().await;
             });
-            if std::env::args().any(|arg| arg == "--autostart") {
+            if background_restart || std::env::args().any(|arg| arg == "--autostart") {
                 park(app.handle());
             } else {
                 present(app.handle());
@@ -957,6 +1045,7 @@ pub fn run() {
             import_verge_webdav,
             webdav_action,
             updates::update_status,
+            updates::set_auto_update,
             updates::check_update,
             updates::install_update
         ])

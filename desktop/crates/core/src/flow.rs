@@ -3,6 +3,10 @@ use crate::browser::Session;
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde_json::{json, Value};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    OnceLock,
+};
 
 pub fn context(project: &str, captcha: &str) -> Value {
     json!([
@@ -406,13 +410,23 @@ pub async fn rpc(
     if bootstrap["status"] != 200 {
         bail!("Flow 页面认证失败，请重新登录同步");
     }
+    static BOOTLOADER_RE: OnceLock<Regex> = OnceLock::new();
+    static SID_RE: OnceLock<Regex> = OnceLock::new();
+    static AT_RE: OnceLock<Regex> = OnceLock::new();
+    static XSRF_RE: OnceLock<Regex> = OnceLock::new();
+    static REQ_ID: AtomicU64 = AtomicU64::new(45123);
+
     let text = bootstrap["text"].as_str().unwrap_or_default();
-    let bootloader = Regex::new(r"boq_labs-ai-sandbox-frontend_[A-Za-z0-9_.-]+")?
+    let bootloader = BOOTLOADER_RE
+        .get_or_init(|| Regex::new(r"boq_labs-ai-sandbox-frontend_[A-Za-z0-9_.-]+").unwrap())
         .find(text)
         .context("Flow 启动元数据缺失")?
         .as_str();
-    let sid_regex = Regex::new(r#""FdrFJe"\s*:\s*"(-?[0-9]+)""#)?;
-    let sid = sid_regex.captures(text).context("Flow 会话元数据缺失")?;
+    let sid = SID_RE
+        .get_or_init(|| Regex::new(r#""FdrFJe"\s*:\s*"(-?[0-9]+)""#).unwrap())
+        .captures(text)
+        .context("Flow 会话元数据缺失")?;
+    let req_id = REQ_ID.fetch_add(1000, Ordering::Relaxed).to_string();
     let mut url =
         url::Url::parse("https://flow.google.com/_/AiSandboxAngularFrontend/data/batchexecute")?;
     url.query_pairs_mut().extend_pairs([
@@ -421,11 +435,12 @@ pub async fn rpc(
         ("bl", bootloader),
         ("f.sid", sid.get(1).unwrap().as_str()),
         ("hl", "en"),
-        ("_reqid", "45123"),
+        ("_reqid", &req_id),
         ("rt", "c"),
     ]);
     let request = json!([[[rpc, argument.to_string(), null, "generic"]]]).to_string();
-    let at = Regex::new(r#""SNlM0e"\s*:\s*"((?:\\.|[^"\\])+)""#)?
+    let at = AT_RE
+        .get_or_init(|| Regex::new(r#""SNlM0e"\s*:\s*"((?:\\.|[^"\\])+)""#).unwrap())
         .captures(text)
         .map(|v| serde_json::from_str::<String>(&format!("\"{}\"", &v[1])))
         .transpose()?
@@ -450,7 +465,10 @@ pub async fn rpc(
     }
     let text = response["text"].as_str().context("Flow RPC 缺少响应")?;
     // XSRF rotation is an explicit pre-submission rejection; repeat only this rejected RPC.
-    if let Some(captures) = Regex::new(r#"\["xsrf"\s*,\s*"((?:\\.|[^"\\])*)""#)?.captures(text) {
+    if let Some(captures) = XSRF_RE
+        .get_or_init(|| Regex::new(r#"\["xsrf"\s*,\s*"((?:\\.|[^"\\])*)""#).unwrap())
+        .captures(text)
+    {
         let at: String = serde_json::from_str(&format!("\"{}\"", &captures[1]))?;
         let body = url::form_urlencoded::Serializer::new(String::new())
             .append_pair("f.req", &request)
