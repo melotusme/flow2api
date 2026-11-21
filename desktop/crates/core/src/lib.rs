@@ -8,6 +8,7 @@ pub mod magpie;
 pub mod migration;
 pub mod model;
 mod monitoring;
+pub mod music;
 mod request;
 pub mod resolver;
 pub mod store;
@@ -17,13 +18,95 @@ pub mod webdav;
 use anyhow::{bail, Result};
 use model::*;
 use std::{
-    path::Path,
+    io::Write,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
 };
 use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub fn userscript_source() -> String {
+    let raw = include_str!("../assets/extension/flow2api-flow-login-sync.user.js");
+    let mut lines = Vec::new();
+    for line in raw.lines() {
+        if line.trim_start().starts_with("// @version") {
+            lines.push(format!("// @version      {VERSION}"));
+        } else if line.trim_start().starts_with("const VERSION =") {
+            let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+            lines.push(format!("{indent}const VERSION = \"{VERSION}\";"));
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+fn chrome_extension_manifest() -> Result<Vec<u8>> {
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(include_str!("../assets/chrome-extension/manifest.json"))?;
+    manifest["version"] = serde_json::Value::String(VERSION.to_string());
+    let mut bytes = serde_json::to_vec_pretty(&manifest)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+fn chrome_extension_files() -> Result<Vec<(&'static str, Vec<u8>)>> {
+    Ok(vec![
+        ("manifest.json", chrome_extension_manifest()?),
+        (
+            "background.js",
+            include_bytes!("../assets/chrome-extension/background.js").to_vec(),
+        ),
+        (
+            "page-hook.js",
+            include_bytes!("../assets/chrome-extension/page-hook.js").to_vec(),
+        ),
+        (
+            "content.js",
+            include_bytes!("../assets/chrome-extension/content.js").to_vec(),
+        ),
+        (
+            "icon32.png",
+            include_bytes!("../assets/chrome-extension/icon32.png").to_vec(),
+        ),
+        (
+            "icon128.png",
+            include_bytes!("../assets/chrome-extension/icon128.png").to_vec(),
+        ),
+    ])
+}
+
+pub fn export_chrome_extension(target_dir: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(target_dir)?;
+    for (name, bytes) in chrome_extension_files()? {
+        let dest = target_dir.join(name);
+        let unchanged = std::fs::read(&dest)
+            .map(|existing| existing == bytes)
+            .unwrap_or(false);
+        if !unchanged {
+            std::fs::write(&dest, &bytes)?;
+        }
+    }
+    Ok(target_dir.to_path_buf())
+}
+
+pub fn chrome_extension_zip() -> Result<Vec<u8>> {
+    let cursor = std::io::Cursor::new(Vec::new());
+    let mut writer = zip::ZipWriter::new(cursor);
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for (name, bytes) in chrome_extension_files()? {
+        writer.start_file(name, options)?;
+        writer.write_all(&bytes)?;
+    }
+    Ok(writer.finish()?.into_inner())
+}
 
 struct Server {
     shutdown: oneshot::Sender<()>,
@@ -32,6 +115,7 @@ struct Server {
 
 pub struct App {
     pub bridge: bridge::Hub,
+    pub music_bridge: bridge::Hub,
     pub store: store::Store,
     status: Mutex<Status>,
     updates: watch::Sender<Status>,
@@ -46,6 +130,7 @@ pub struct App {
 impl App {
     pub fn open(root: &Path) -> Result<Arc<Self>> {
         let store = store::Store::open(root)?;
+        export_chrome_extension(&root.join("chrome-extension"))?;
         let status = Status {
             service: "stopped".into(),
             browser: "未连接".into(),
@@ -58,6 +143,7 @@ impl App {
         ));
         let app = Arc::new(Self {
             bridge: bridge::Hub::default(),
+            music_bridge: bridge::Hub::default(),
             browsers: browser::BrowserPool::new(root.join("profiles")),
             store,
             status: Mutex::new(status),
@@ -82,12 +168,31 @@ impl App {
                         && (!a.browser_bridge || self.bridge.ready(&a.id))
                 })
                 .count();
-            if accounts.iter().any(|a| a.available() && a.browser_bridge) {
-                let connected = accounts
-                    .iter()
-                    .filter(|a| a.available() && a.browser_bridge && self.bridge.ready(&a.id))
-                    .count();
-                status.browser = format!("默认浏览器：{connected} 个连接可用");
+            status.music_ready_accounts = accounts
+                .iter()
+                .filter(|a| {
+                    a.available()
+                        && a.music_enabled
+                        && a.music_last_synced.is_some()
+                        && self.music_bridge.ready(&a.id)
+                })
+                .count();
+            let flow_connected = accounts
+                .iter()
+                .filter(|a| a.available() && a.browser_bridge && self.bridge.ready(&a.id))
+                .count();
+            let music_connected = status.music_ready_accounts;
+            if flow_connected > 0 || music_connected > 0 {
+                let mut parts = Vec::new();
+                if flow_connected > 0 {
+                    parts.push(format!("Flow {flow_connected}"));
+                }
+                if music_connected > 0 {
+                    parts.push(format!("Music {music_connected}"));
+                }
+                status.browser = format!("已连接 · {}", parts.join(" · "));
+            } else if accounts.iter().any(|a| a.available() && a.browser_bridge) {
+                status.browser = "浏览器未连接".into();
             }
         }
         status
@@ -112,6 +217,15 @@ impl App {
                     a.available()
                         && a.last_synced.is_some()
                         && (!a.browser_bridge || self.bridge.ready(&a.id))
+                })
+                .count();
+            s.music_ready_accounts = accounts
+                .iter()
+                .filter(|a| {
+                    a.available()
+                        && a.music_enabled
+                        && a.music_last_synced.is_some()
+                        && self.music_bridge.ready(&a.id)
                 })
                 .count();
             s.queued = counts.queued;
@@ -220,6 +334,7 @@ impl App {
             return Err(error);
         }
         self.bridge.clear();
+        self.music_bridge.clear();
         self.browsers.close_all().await;
         self.change_status(|s| s.browser = "已关闭".into());
         Ok(())

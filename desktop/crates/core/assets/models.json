@@ -11069,5 +11069,145 @@
         "scope": "当前 Pro 账号基础图片 / 视频 720p 的页面报价；参考图、续写、放大未单独核价。"
       }
     }
+  },
+  "flow-music-standard": {
+    "config": {
+      "type": "audio",
+      "service": "music",
+      "model_name": "producer:standard",
+      "instrumental": false,
+      "listed": true,
+      "display_name": "Flow Music · 人声歌曲 · 标准"
+    },
+    "capabilities": {
+      "family": "Flow Music",
+      "kind": "music_vocal",
+      "type": "audio",
+      "summary": "文字描述生成带人声的完整歌曲（支持中英文、童声、指定歌词），约 30 秒–2 分钟出歌。",
+      "aspect_ratio": "立体声",
+      "duration_seconds": null,
+      "resolution": "标准",
+      "supports_images": false,
+      "min_images": 0,
+      "max_images": 0,
+      "requires_video_id": false,
+      "supports_lyrics": true,
+      "supports_duration": true,
+      "access_note": "需要默认浏览器打开 flowmusic.app 并登录；歌曲自动保存为本地 .m4a 与歌词。",
+      "pricing": {
+        "credits": 5,
+        "unit": "首",
+        "verified_at": "2026-11-20",
+        "status": "observed",
+        "source_url": "https://www.flowmusic.app/",
+        "note": "实测一首歌约扣 5 Flow Music 积分，以页面实际扣费为准。",
+        "scope": "Flow Music 标准模式单首生成参考值。"
+      }
+    }
+  },
+  "flow-music-fast": {
+    "config": {
+      "type": "audio",
+      "service": "music",
+      "model_name": "producer:fast",
+      "instrumental": false,
+      "listed": true,
+      "display_name": "Flow Music · 人声歌曲 · 快速"
+    },
+    "capabilities": {
+      "family": "Flow Music",
+      "kind": "music_vocal",
+      "type": "audio",
+      "summary": "快速模式生成带人声的完整歌曲，等待时间更短。",
+      "aspect_ratio": "立体声",
+      "duration_seconds": null,
+      "resolution": "快速",
+      "supports_images": false,
+      "min_images": 0,
+      "max_images": 0,
+      "requires_video_id": false,
+      "supports_lyrics": true,
+      "supports_duration": true,
+      "access_note": "需要默认浏览器打开 flowmusic.app 并登录；歌曲自动保存为本地 .m4a 与歌词。",
+      "pricing": {
+        "credits": 5,
+        "unit": "首",
+        "verified_at": "2026-11-20",
+        "status": "observed",
+        "source_url": "https://www.flowmusic.app/",
+        "note": "实测约扣 5 Flow Music 积分，以页面实际扣费为准。",
+        "scope": "Flow Music 快速模式单首生成参考值。"
+      }
+    }
+  },
+  "flow-music-instrumental-standard": {
+    "config": {
+      "type": "audio",
+      "service": "music",
+      "model_name": "producer:standard",
+      "instrumental": true,
+      "listed": true,
+      "display_name": "Flow Music · 纯器乐配乐 · 标准"
+    },
+    "capabilities": {
+      "family": "Flow Music",
+      "kind": "music_instrumental",
+      "type": "audio",
+      "summary": "生成纯器乐配乐／背景音乐（BGM），无人声与歌词，可指定大致时长。",
+      "aspect_ratio": "立体声",
+      "duration_seconds": null,
+      "resolution": "标准",
+      "supports_images": false,
+      "min_images": 0,
+      "max_images": 0,
+      "requires_video_id": false,
+      "supports_lyrics": false,
+      "supports_duration": true,
+      "access_note": "需要默认浏览器打开 flowmusic.app 并登录；音频自动保存为本地 .m4a。",
+      "pricing": {
+        "credits": 5,
+        "unit": "首",
+        "verified_at": "2026-11-20",
+        "status": "observed",
+        "source_url": "https://www.flowmusic.app/",
+        "note": "实测约扣 5 Flow Music 积分，以页面实际扣费为准。",
+        "scope": "Flow Music 标准纯器乐参考值。"
+      }
+    }
+  },
+  "flow-music-instrumental-fast": {
+    "config": {
+      "type": "audio",
+      "service": "music",
+      "model_name": "producer:fast",
+      "instrumental": true,
+      "listed": true,
+      "display_name": "Flow Music · 纯器乐配乐 · 快速"
+    },
+    "capabilities": {
+      "family": "Flow Music",
+      "kind": "music_instrumental",
+      "type": "audio",
+      "summary": "快速模式生成纯器乐配乐／BGM，无人声与歌词。",
+      "aspect_ratio": "立体声",
+      "duration_seconds": null,
+      "resolution": "快速",
+      "supports_images": false,
+      "min_images": 0,
+      "max_images": 0,
+      "requires_video_id": false,
+      "supports_lyrics": false,
+      "supports_duration": true,
+      "access_note": "需要默认浏览器打开 flowmusic.app 并登录；音频自动保存为本地 .m4a。",
+      "pricing": {
+        "credits": 5,
+        "unit": "首",
+        "verified_at": "2026-11-20",
+        "status": "observed",
+        "source_url": "https://www.flowmusic.app/",
+        "note": "实测约扣 5 Flow Music 积分，以页面实际扣费为准。",
+        "scope": "Flow Music 快速纯器乐参考值。"
+      }
+    }
   }
 }

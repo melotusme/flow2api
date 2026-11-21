@@ -19,6 +19,11 @@ test('changing image/video workflow preserves compatible dimensions and falls ba
   assert.equal(extend.model.capabilities.requires_video_id,true);
   const back=choices(models,{...extend.selected,type:'image'});
   assert.equal(back.model.capabilities.type,'image');
+  const audio=choices(models,{...back.selected,type:'audio'});
+  assert.equal(audio.model.capabilities.type,'audio');
+  assert.equal(audio.model.capabilities.family,'Flow Music');
+  const inst=choices(models,{...audio.selected,kind:'music_instrumental',spec:'快速'});
+  assert.equal(inst.model.id,'flow-music-instrumental-fast');
 });
 test('submit validation focuses actionable inputs and counts UTF-8 bytes',()=>{
   const image=models.find(m=>m.id==='gemini-3.1-flash-lite-image-square');

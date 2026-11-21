@@ -3,7 +3,7 @@
   'use strict';
   const fields=['type','family','kind','aspect_ratio','spec'];
   const value=(model,field)=>field==='spec'
-    ? String(model.capabilities.type==='image'?model.capabilities.resolution:model.capabilities.duration_seconds)
+    ? String(model.capabilities.type==='video'?model.capabilities.duration_seconds:model.capabilities.resolution)
     : String(model.capabilities[field]);
   function choices(models,wanted={}){
     let remaining=models;

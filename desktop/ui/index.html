@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Flow2API</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23292a2e'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='system-ui,sans-serif' font-size='18' font-weight='700' fill='%23c6d6cb'%3EF%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -26,7 +27,7 @@
       <div class="aside-bottom">
         <div id="service-pill"><i aria-hidden="true"></i><span>正在连接</span></div>
         <div class="aside-update">
-          <span class="version-badge" id="aside-version">v0.3.11</span>
+          <span class="version-badge" id="aside-version">v0.4.0</span>
           <button id="sidebar-check-update" class="text-button" type="button">检查更新 ↗</button>
         </div>
         <small class="aside-tip">关闭窗口后留在菜单栏，API 继续运行。</small>
@@ -51,30 +52,59 @@
       <section id="studio" class="page">
         <div id="readiness" class="readiness" role="status" aria-live="polite">
           <div><strong id="readiness-title">正在读取创作状态</strong><p id="readiness-detail">请稍候。</p></div>
-          <button id="readiness-action" class="secondary" type="button" hidden>连接账号</button>
+          <div class="actions">
+            <button id="readiness-secondary" class="secondary" type="button" hidden>管理账号</button>
+            <button id="readiness-action" class="secondary" type="button" hidden>连接账号</button>
+          </div>
         </div>
         <div class="studio-layout">
           <div class="panel composer">
-            <div class="section-heading"><div><h2>新建生成任务</h2><p>选择模型，填写描述。生成结果自动保存到本机。</p></div></div>
-            <div class="form-grid">
-              <label>创作类型<select id="model-type"><option value="image">图片</option><option value="video">视频</option></select></label>
-              <label>模型<select id="model-family"></select></label>
+            <div class="section-heading">
+              <div><h2>新建生成任务</h2><p>支持 Google Flow 图片／视频 与 Flow Music 歌曲创作，作品自动保存到本机。</p></div>
             </div>
-            <label id="kind-field">用途<select id="model-kind"></select></label>
-            <div class="form-grid">
-              <label>画面比例<select id="model-ratio"></select></label>
-              <label><span id="spec-label">清晰度</span><select id="model-spec"></select></label>
+            <div class="mode-switch" role="tablist" aria-label="创作类型">
+              <button type="button" role="tab" data-mode="image" aria-selected="true" class="active">图片</button>
+              <button type="button" role="tab" data-mode="video" aria-selected="false">视频</button>
+              <button type="button" role="tab" data-mode="audio" aria-selected="false">音乐</button>
             </div>
-            <select id="model" hidden aria-label="API 模型标识"></select>
+            <select id="model-type" name="model_type" hidden aria-label="创作类型">
+              <option value="image">图片</option>
+              <option value="video">视频</option>
+              <option value="audio">音乐</option>
+            </select>
+            <div class="form-grid picker-grid" id="picker-grid">
+              <label id="family-field">模型<select id="model-family" name="model_family"></select></label>
+              <label id="kind-field">用途<select id="model-kind" name="model_kind"></select></label>
+              <label id="ratio-field">画面比例<select id="model-ratio" name="model_ratio"></select></label>
+              <label id="spec-field"><span id="spec-label">清晰度</span><select id="model-spec" name="model_spec"></select></label>
+            </div>
+            <select id="model" name="model" hidden aria-label="API 模型标识"></select>
             <p class="hint" id="model-info"></p>
-            <label>描述<textarea id="prompt" rows="5" placeholder="输入画面描述；使用参考图时，说明需要修改的内容。"></textarea></label>
+            <div class="label-row">
+              <label for="prompt" id="prompt-label">描述</label>
+              <small id="prompt-count" class="muted-meta">0 字</small>
+            </div>
+            <textarea id="prompt" name="prompt" rows="5" placeholder="输入画面描述；使用参考图时，说明需要修改的内容。"></textarea>
+            <div id="music-fields" hidden>
+              <div class="form-grid">
+                <label>大致时长（秒，可选）<input id="music-seconds" name="music_seconds" type="number" min="15" max="300" step="1" placeholder="留空约 2 分钟"></label>
+                <div class="music-tip-box"><small>时长为近似目标（例如填 60 秒，实际约 55–70 秒）。纯器乐配乐无需歌词。</small></div>
+              </div>
+              <label id="lyrics-field">自定义歌词（可选）<textarea id="music-lyrics" name="music_lyrics" rows="4" placeholder="留空由 Flow Music 自动作词；支持 [Verse] / [Chorus] 段落标签。"></textarea></label>
+            </div>
             <div class="form-grid">
-              <label>使用账号<select id="account"><option value="">自动分配已登录账号</option></select></label>
+              <label>使用账号<select id="account" name="account_id"><option value="">自动分配已登录账号</option></select></label>
               <label id="video-field" hidden>源视频 media ID<input id="video-id" name="video_id" spellcheck="false" placeholder="Flow 视频 ID"></label>
             </div>
-            <label>参考图片<input id="images" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-describedby="reference-hint"></label>
-            <p id="reference-hint" class="hint"></p>
-            <div id="references"></div>
+            <div id="reference-section">
+              <label for="images">参考图片</label>
+              <div id="reference-dropzone" class="dropzone">
+                <input id="images" name="images" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-describedby="reference-hint">
+                <small class="dropzone-tip">支持点击选择、拖拽图片到此区域，或直接 Ctrl / ⌘ + V 粘贴图片</small>
+              </div>
+              <p id="reference-hint" class="hint"></p>
+              <div id="references"></div>
+            </div>
             <div class="draft-row">
               <small id="draft-status">草稿保存在本机</small>
               <button id="clear-draft" class="text-button" type="button">清空草稿</button>
@@ -94,46 +124,34 @@
       </section>
       <section id="tasks" class="page" hidden>
         <div class="panel">
-          <div class="section-heading"><div><h2>生成任务</h2><p>查看任务进度、下载结果或重试失败任务。</p></div><button class="secondary refresh" type="button">刷新</button></div>
+          <div class="section-heading"><div><h2>生成任务</h2><p>查看图片、视频与音乐任务进度，试听预览或重试失败任务。</p></div><button class="secondary refresh" type="button">刷新</button></div>
           <div id="task-list"></div>
         </div>
       </section>
       <section id="library" class="page" hidden>
         <div class="panel">
-          <div class="section-heading"><div><h2>保存在这台电脑上的作品</h2><p>生成成功后自动归档，升级应用时保留。</p></div><button class="secondary" id="open-data" type="button">打开文件目录 ↗</button></div>
+          <div class="section-heading"><div><h2>保存在这台电脑上的作品</h2><p>图片、视频与音乐生成成功后自动归档，升级应用时保留。</p></div><button class="secondary" id="open-data" type="button">打开文件目录 ↗</button></div>
           <div id="media-grid"></div>
         </div>
       </section>
       <section id="accounts" class="page" hidden>
         <div class="panel">
-          <div class="section-heading"><div><h2>连接与管理 Google 账号</h2><p>本机免连接码直连；支持优先级调度、临时禁用冷却、图片／视频能力分流与备注管理。</p></div><span class="tag">默认浏览器直连</span></div>
-          <ol class="connect-steps">
-            <li>安装 Tampermonkey 扩展与连接脚本（首次或升级脚本时）</li>
-            <li>打开 Flow 登录 Google 账号，页面右下角自动免码直连并同步积分</li>
-            <li>多账号按优先级与空闲状态自动分配，Google Cookie 始终留在浏览器</li>
-          </ol>
-          <div class="actions">
-            <button id="open-flow" class="primary" type="button">打开 Flow 页面 ↗</button>
-            <button id="open-userscript" class="secondary" type="button">安装 / 更新连接脚本 ↗</button>
-            <button id="sync-all-accounts" class="secondary" type="button">全部同步余额</button>
-          </div>
-          <details class="advanced-login">
-            <summary>高级选项：备用连接码与专用 Chrome 独立登录</summary>
-            <div class="actions advanced-actions">
-              <button id="pair-browser" class="secondary" type="button">生成备用连接码</button>
-              <button id="quick-login" class="secondary" type="button">打开专用 Chrome 登录 ↗</button>
-              <button id="download-chrome" class="secondary" type="button">下载 Chrome ↗</button>
+          <div class="section-heading accounts-heading">
+            <div>
+              <h2>Google 账号</h2>
+              <p>在默认浏览器打开 Flow 或 Flow Music 并登录，通过 Chrome 插件或油猴脚本（v0.4.0）自动免码直连；保持标签页打开即可创作。</p>
             </div>
-            <p id="pairing-code" class="hint" role="status" aria-live="polite"></p>
-            <p class="hint">本机 localhost（127.0.0.1）直连免填连接码；专用 Chrome 模式单独使用独立资料，不复用默认浏览器登录。</p>
-            <form id="add-account" class="inline-form">
-              <label for="email" class="sr-only">Google 账号邮箱</label>
-              <input type="email" id="email" name="email" required autocomplete="email" spellcheck="false" placeholder="你的 Google 账号邮箱">
-              <button class="secondary" type="submit" data-open-login="true">添加并打开登录 ↗</button>
-              <button class="secondary" type="submit" data-open-login="false">仅添加</button>
-            </form>
-            <div class="preferred-accounts"><span class="hint">常用账号，点选填入：</span><div id="preferred-emails" class="actions"></div></div>
-          </details>
+            <div class="actions">
+              <button id="open-flow" class="primary" type="button">打开 Flow ↗</button>
+              <button id="open-flow-music" class="secondary" type="button">打开 Flow Music ↗</button>
+              <button id="sync-all-accounts" class="secondary" type="button" hidden>全部同步</button>
+              <button id="open-chrome-extension" class="secondary" type="button">安装 Chrome 插件 ↗</button>
+              <button id="open-userscript" class="secondary" type="button">安装油猴脚本 ↗</button>
+            </div>
+          </div>
+          <div id="accounts-chrome-tip" class="info-banner" hidden>
+            <span>推荐点击「安装 Chrome 插件 ↗」加载免配置直连扩展（无需 Tampermonkey）；或点击「安装油猴脚本 ↗」使用 v0.4.0 脚本（Chrome 138+ 需在 Tampermonkey 扩展详情页开启「允许运行用户脚本」），安装后刷新 Flow / Flow Music 页面即可自动直连。</span>
+          </div>
           <div id="account-list"></div>
         </div>
       </section>
@@ -149,23 +167,25 @@
           <div id="settings-runtime">
             <form id="settings-form" class="settings-section" aria-labelledby="settings-runtime-title">
               <div class="section-heading"><div><h2 id="settings-runtime-title" tabindex="-1">运行设置</h2><p>无执行中任务时保存即生效；仅修改端口时会重启 API，修改其他项不中断连接。</p></div></div>
-              <label>API 端口<input name="port" type="number" min="1" max="65535" required></label>
-              <label>API Key（至少 16 字符）<input name="api_key" type="password" autocomplete="off" spellcheck="false" minlength="16" required></label>
-              <label>Chrome 程序路径（留空自动查找）<input name="browser_executable" spellcheck="false" placeholder="使用本机 Chrome"></label>
-              <div class="actions"><button id="choose-browser" class="secondary" type="button">选择浏览器程序 ↗</button></div>
-              <p class="hint">仅用于高级选项中的专用 Chrome 登录。默认浏览器连接无需设置此路径，网络跟随当前浏览器。</p>
-              <label>HTTP / SOCKS5 代理<input name="proxy_url" type="url" spellcheck="false" placeholder="http://127.0.0.1:7890"></label>
-              <div class="form-grid form-grid-3">
-                <label>同时执行任务<input name="max_concurrent" type="number" min="1" max="8" required></label>
-                <label>图片超时（秒）<input name="image_timeout_seconds" type="number" min="30" required></label>
-                <label>视频超时（秒）<input name="video_timeout_seconds" type="number" min="30" required></label>
+              <label>API 端口<input id="setting-port" name="port" type="number" min="1" max="65535" required></label>
+              <label for="setting-api-key">API Key（至少 16 字符）</label>
+              <div class="secret-row">
+                <input id="setting-api-key" name="api_key" type="password" autocomplete="off" spellcheck="false" minlength="16" required>
+                <button id="toggle-api-key" class="secondary" type="button" aria-pressed="false">显示</button>
+              </div>
+              <label>HTTP / SOCKS5 代理<input id="setting-proxy-url" name="proxy_url" type="url" spellcheck="false" placeholder="http://127.0.0.1:7890"></label>
+              <div class="form-grid">
+                <label>同时执行任务<input id="setting-max-concurrent" name="max_concurrent" type="number" min="1" max="8" required></label>
+                <label>图片超时（秒）<input id="setting-image-timeout" name="image_timeout_seconds" type="number" min="30" required></label>
+                <label>视频超时（秒）<input id="setting-video-timeout" name="video_timeout_seconds" type="number" min="30" required></label>
+                <label>音乐超时（秒）<input id="setting-music-timeout" name="music_timeout_seconds" type="number" min="30" required></label>
               </div>
               <div class="actions"><button class="primary" type="submit">保存并生效</button></div>
             </form>
           </div>
           <section id="settings-tools" class="settings-section" aria-labelledby="settings-tools-title">
             <h2 id="settings-tools-title" tabindex="-1">外部工具接入</h2>
-            <p>使用 OpenAI 兼容协议，填入本机地址和 API Key。</p>
+            <p>使用 OpenAI 兼容协议，填入本机地址和 API Key，支持图片、视频与 Flow Music 模型。</p>
             <code id="base-url">http://127.0.0.1:8000/v1</code>
             <div class="actions">
               <button id="copy-base" class="secondary" type="button">复制地址</button>
@@ -178,36 +198,38 @@
             <p class="hint">需要先安装并打开 Magpie。Agent 使用 hzr-flow2api-image 技能生图；保持 Flow 标签页已登录并连接。</p>
           </section>
           <section id="settings-sync" class="settings-section" aria-labelledby="settings-sync-title">
-            <h2 id="settings-sync-title" tabindex="-1">WebDAV 同步</h2>
-            <p>同步生成超时、同时执行数，以及账号的邮箱、启用状态、优先级、能力分流开关、备注和项目编号。端口、调用密钥、代理、浏览器路径和开机自启留在本机。传输走 HTTPS，应用密码放在系统凭据库。同步文件本身没有端到端加密。</p>
-            <label>WebDAV 目录<input id="webdav-url" name="webdav_url" type="url" spellcheck="false" placeholder="https://dav.jianguoyun.com/dav/" autocomplete="off"></label>
-            <label>账号<input id="webdav-user" name="webdav_username" autocomplete="username" spellcheck="false"></label>
-            <label>应用密码<input id="webdav-secret" name="webdav_secret" type="password" autocomplete="new-password" spellcheck="false" placeholder="留空则保留已保存的密码"></label>
-            <p id="webdav-status" class="hint" role="status" aria-live="polite"></p>
-            <div class="actions">
-              <button id="webdav-save" class="secondary" type="button">保存连接</button>
-              <button id="webdav-test" class="secondary" type="button">测试连接</button>
-              <button id="webdav-import" class="secondary" type="button">从 Clash Verge 导入</button>
-            </div>
-            <div class="actions">
-              <button id="webdav-push" class="primary" type="button">上传配置</button>
-              <button id="webdav-pull" class="secondary" type="button">下载并合并</button>
-            </div>
+            <form id="webdav-form" onsubmit="event.preventDefault()">
+              <h2 id="settings-sync-title" tabindex="-1">WebDAV 同步</h2>
+              <p>同步生成超时、同时执行数，以及账号的邮箱、启用状态、优先级、能力分流开关、备注和项目编号。端口、调用密钥、代理和开机自启留在本机。传输走 HTTPS，应用密码放在系统凭据库。</p>
+              <label>WebDAV 目录<input id="webdav-url" name="webdav_url" type="url" spellcheck="false" placeholder="https://dav.jianguoyun.com/dav/" autocomplete="off"></label>
+              <label>账号<input id="webdav-user" name="webdav_username" autocomplete="username" spellcheck="false"></label>
+              <label>应用密码<input id="webdav-secret" name="webdav_secret" type="password" autocomplete="new-password" spellcheck="false" placeholder="留空则保留已保存的密码"></label>
+              <p id="webdav-status" class="hint" role="status" aria-live="polite"></p>
+              <div class="actions">
+                <button id="webdav-save" class="secondary" type="button">保存连接</button>
+                <button id="webdav-test" class="secondary" type="button">测试连接</button>
+                <button id="webdav-import" class="secondary" type="button">从 Clash Verge 导入</button>
+              </div>
+              <div class="actions">
+                <button id="webdav-push" class="primary" type="button">上传配置</button>
+                <button id="webdav-pull" class="secondary" type="button">下载并合并</button>
+              </div>
+            </form>
           </section>
           <section id="settings-local" class="settings-section" aria-labelledby="settings-local-title">
             <h2 id="settings-local-title" tabindex="-1">本机与数据</h2>
-            <label class="migration-checkbox"><input id="autostart" type="checkbox">登录后自动启动</label>
+            <label class="migration-checkbox"><input id="autostart" name="autostart" type="checkbox">登录后自动启动</label>
             <p class="hint">开关读取系统里的真实开机项，只保存在这台电脑。手动打开会显示窗口；开机自启只留在菜单栏，不打开窗口。</p>
             <h3>后台运行</h3>
             <p>关闭窗口只隐藏主窗口。应用留在 macOS 菜单栏（文字 Flow）或 Windows 通知区域，API 和生成任务继续。点菜单「打开 Flow2API」回到窗口。要停止请选退出；有未完成任务时不能退出。</p>
             <h3>数据位置</h3>
             <p id="data-path" class="hint"></p>
             <div class="actions"><button class="secondary" id="settings-open-data" type="button">打开数据目录 ↗</button></div>
-            <p class="hint">Chrome 登录资料保存在本机。不要分享包含账号资料的数据目录。</p>
+            <p class="hint">应用配置与本地作品保存在本机，Google 登录态始终保留在浏览器中。</p>
           </section>
           <section id="settings-updates" class="settings-section" aria-labelledby="settings-updates-title">
             <div class="section-heading">
-              <div><h2 id="settings-updates-title" tabindex="-1">软件版本与更新</h2><p>当前运行版本：<b id="settings-current-version">v0.3.11</b></p></div>
+              <div><h2 id="settings-updates-title" tabindex="-1">软件版本与更新</h2><p>当前运行版本：<b id="settings-current-version">v0.4.0</b></p></div>
               <span class="tag" id="update-badge">检查更新</span>
             </div>
             <p id="update-status" class="hint" role="status" aria-live="polite">从公开的 GitHub Release 检查更新，无需登录。</p>
@@ -216,15 +238,15 @@
               <button id="install-update" class="primary" type="button" hidden>安装更新并重启</button>
             </div>
             <div class="settings-update-preference">
-              <label class="migration-checkbox"><input id="auto-update" type="checkbox">自动后台检查、下载并安装更新</label>
+              <label class="migration-checkbox"><input id="auto-update" name="auto_update" type="checkbox">自动后台检查、下载并安装更新</label>
               <p class="hint">启动 15 秒后及每 2 小时在后台检查，发现新版本后自动下载并验证签名；任务空闲时自动安装并重启（窗口隐藏时静默更新，不打扰当前操作）。开关即时生效，也可在菜单栏／托盘随时切换。</p>
             </div>
           </section>
         </div>
       </section>
       <footer>
-        <span id="footer-version">Flow2API Desktop v0.3.11 · Rust + Tauri</span>
-        <span id="browser-status">Chrome 未连接</span>
+        <span id="footer-version">Flow2API Desktop v0.4.0 · Rust + Tauri</span>
+        <span id="browser-status">浏览器未连接</span>
       </footer>
     </main>
   </div>

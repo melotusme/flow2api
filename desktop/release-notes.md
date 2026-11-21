@@ -1,3 +1,16 @@
+# v0.4.0 · Flow Music 音乐生成、Chrome 扩展直连与账号界面精简
+
+- **新增 Flow Music 音乐生成与浏览器直连**：
+  - 创作工作台与本机 OpenAI 兼容接口新增 `Flow Music` 音乐模型（`flow-music-standard` / `flow-music-fast` / `flow-music-instrumental` / `flow-music-instrumental-fast`），支持带人声歌曲与纯器乐配乐、自定义歌词（含 `[Verse]` / `[Chorus]` 标签）与目标时长控制。
+  - 新增 `flowmusic.app` 本机直连桥（`/api/music-bridge/pair`、`/api/music-bridge/poll`），Supabase 登录凭据始终留在浏览器标签页，生成完成后自动下载归档 `.m4a` 音频并支持应用内试听与歌词查看。
+- **新增 Chrome 扩展免配置直连，三端版本号统一为 v0.4.0**：
+  - 内置 Manifest V3 `Flow2API 浏览器直连` Chrome 扩展（同时支持 `flow.google.com` 与 `flowmusic.app`），无需安装 Tampermonkey 或开启「允许运行用户脚本」权限即可免连接码自动配对。
+  - 桌面端启动时自动解压并同步更新扩展目录（`<数据目录>/chrome-extension`），账号页新增「安装 Chrome 插件 ↗」一键打开目录并复制路径，同时提供 `GET /extension/flow2api-chrome-extension.zip` 下载接口。
+  - 桌面应用、Chrome 扩展与油猴连接脚本统一锁定为 `v0.4.0`（构建期由 `CARGO_PKG_VERSION` 自动注入校验），并内置扩展与油猴脚本同页防重复挂载保护。
+- **修复多账号 `User Data` 目录冲突与账号界面精简**：
+  - 移除单 `User Data` 根目录限制，允许同一浏览器根目录下不同 Profile（如 `Default`、`Profile 6`）共存，并在启动与配对时自动清理浏览器直连账号残留的旧版资料目录字段，彻底修复保存／启用／同步账号时报「同一根目录不能并发管理多个账号」的问题。
+  - 精简 Google 账号列表与管理弹窗，「设置与接入」页面新增平滑纵向滚动吸附（Scroll Snap）并与吸顶分区导航实时联动。
+
 # v0.3.11 · 全站组件 UI 统一与下拉／多选控件精修
 
 - **全站设计体系与跨页组件统一**：

@@ -1,4 +1,3 @@
-mod local_env;
 mod updates;
 
 use flow2api_core::{catalog, model::*, App};
@@ -60,10 +59,6 @@ fn result<T>(core: &App, value: anyhow::Result<T>) -> Result<T, String> {
 #[tauri::command]
 fn status(state: tauri::State<Desktop>) -> Status {
     state.core.status()
-}
-#[tauri::command]
-fn preferred_emails(app: tauri::AppHandle) -> Vec<String> {
-    local_env::preferred_emails(app.path().app_data_dir().ok().as_deref())
 }
 #[tauri::command]
 fn settings(state: tauri::State<Desktop>) -> Result<Settings, String> {
@@ -131,16 +126,19 @@ fn browser_connections(
     state.core.bridge.statuses()
 }
 #[tauri::command]
-fn browser_pairing_code(state: tauri::State<Desktop>) -> Result<String, String> {
-    if state.core.status().service != "running" {
-        return Err("请先启动本机 API，再连接浏览器".into());
-    }
-    Ok(state.core.bridge.pairing_code())
+fn music_connections(state: tauri::State<Desktop>) -> Vec<flow2api_core::bridge::ConnectionStatus> {
+    state.core.music_bridge.statuses()
 }
 #[tauri::command]
 fn open_flow_page(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_url("https://flow.google.com/projects", None::<&str>)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn open_flow_music_page(app: tauri::AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url("https://www.flowmusic.app/session", None::<&str>)
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -153,6 +151,7 @@ async fn save_account(
     note: Option<String>,
     image_enabled: Option<bool>,
     video_enabled: Option<bool>,
+    music_enabled: Option<bool>,
     disabled_until: Option<String>,
     disabled_reason: Option<String>,
     clear_error: Option<bool>,
@@ -188,6 +187,9 @@ async fn save_account(
     }
     if let Some(video_enabled) = video_enabled {
         account.video_enabled = video_enabled;
+    }
+    if let Some(music_enabled) = music_enabled {
+        account.music_enabled = music_enabled;
     }
     if let Some(until) = disabled_until {
         let until = until.trim();
@@ -243,56 +245,6 @@ async fn temp_disable_account(
     Ok(account)
 }
 #[tauri::command]
-async fn configure_account_browser(
-    state: tauri::State<'_, Desktop>,
-    id: String,
-    data_dir: String,
-    profile: String,
-) -> Result<(), String> {
-    let _gate = state.core.job_gate.lock().await;
-    if state.core.status().busy() {
-        return Err("请等待任务完成后修改浏览器资料".into());
-    }
-    let mut account = result(&state.core, state.core.store.account(&id))?;
-    if !data_dir.is_empty() {
-        flow2api_core::browser::validate_profile(&data_dir, &profile).map_err(|e| e.to_string())?;
-    }
-    state.core.browsers.close_all().await;
-    state.core.bridge.remove(&id);
-    result(&state.core, state.core.store.revoke_browser_connection(&id))?;
-    account.browser_data_dir = data_dir;
-    account.browser_bridge = false;
-    account.browser_profile = if account.browser_data_dir.is_empty() {
-        String::new()
-    } else {
-        profile
-    };
-    account.last_synced = None;
-    account.credits = None;
-    result(&state.core, state.core.store.save_account(&account))?;
-    result(&state.core, state.core.refresh())
-}
-#[tauri::command]
-async fn browser_profiles() -> Result<Vec<flow2api_core::browser::BrowserProfile>, String> {
-    tokio::task::spawn_blocking(flow2api_core::browser::discover_profiles)
-        .await
-        .map_err(|e| e.to_string())
-}
-#[tauri::command]
-async fn choose_browser(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("选择 Chrome 程序（Mac 可选择 Google Chrome.app）")
-            .blocking_pick_file()
-            .map(|f| f.into_path().map_err(|e| e.to_string()))
-            .transpose()
-            .map(|f| f.map(|p| p.to_string_lossy().into_owned()))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-#[tauri::command]
 async fn delete_account(state: tauri::State<'_, Desktop>, id: String) -> Result<(), String> {
     let _gate = state.core.job_gate.lock().await;
     if state.core.status().busy() {
@@ -300,80 +252,20 @@ async fn delete_account(state: tauri::State<'_, Desktop>, id: String) -> Result<
     }
     result(&state.core, state.core.store.delete_account(&id))?;
     state.core.bridge.remove(&id);
+    state.core.music_bridge.remove(&id);
     state.core.browsers.close_all().await;
     result(&state.core, state.core.refresh())
 }
 #[tauri::command]
-async fn open_login(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, Desktop>,
-    id: String,
-) -> Result<(), String> {
-    result(&state.core, state.core.open_login(&id).await)?;
-    watch_login(app, state.core.clone(), id, false);
-    Ok(())
-}
-/// One click: open a fresh Chrome on Google sign-in; the email is detected automatically.
-#[tauri::command]
-async fn quick_login(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, Desktop>,
-) -> Result<(), String> {
-    let id = result(&state.core, state.core.start_quick_login().await)?;
-    watch_login(app, state.core.clone(), id, true);
-    Ok(())
-}
-/// Poll the login window for up to 10 minutes. `pending` means the account is not saved
-/// yet: first detect the email and create it, then keep syncing until credits are readable.
-fn watch_login(app: tauri::AppHandle, core: Arc<App>, id: String, mut pending: bool) {
-    tauri::async_runtime::spawn(async move {
-        for _ in 0..200 {
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            if core.browsers.existing_session(&id).await.is_none() {
-                break;
-            }
-            let synced = if pending {
-                match core.try_finish_quick_login(&id).await {
-                    Ok(Some(account)) => {
-                        pending = false;
-                        let _ = app.emit("account-synced", &account);
-                        if account.last_synced.is_none() {
-                            let _ = app.emit(
-                                "notice",
-                                format!("已识别 {}，正在等待 Flow 页面就绪后同步…", account.email),
-                            );
-                            continue;
-                        }
-                        Some(account)
-                    }
-                    Ok(None) => None,
-                    Err(error) => {
-                        let _ = app.emit("notice", error.to_string());
-                        core.browsers.discard(&id).await;
-                        return;
-                    }
-                }
-            } else {
-                core.try_auto_sync(&id).await.ok().flatten()
-            };
-            if let Some(account) = synced {
-                let _ = app.emit("account-synced", &account);
-                let _ = app.emit(
-                    "notice",
-                    format!("{} 登录成功，已自动同步。", account.email),
-                );
-                return;
-            }
-        }
-        // The window was closed (or timed out) before an email was detected: nothing to keep.
-        if pending {
-            core.browsers.discard(&id).await;
-        }
-    });
-}
-#[tauri::command]
 async fn sync_account(state: tauri::State<'_, Desktop>, id: String) -> Result<Account, String> {
     result(&state.core, state.core.sync_account(&id).await)
+}
+#[tauri::command]
+async fn sync_music_account(
+    state: tauri::State<'_, Desktop>,
+    id: String,
+) -> Result<Account, String> {
+    result(&state.core, state.core.sync_music_account(&id).await)
 }
 #[tauri::command]
 fn tasks(state: tauri::State<Desktop>) -> Result<Vec<Task>, String> {
@@ -521,10 +413,17 @@ async fn rollback_legacy(state: tauri::State<'_, Desktop>, id: String) -> Result
     outcome
 }
 #[tauri::command]
-fn open_chrome_download(app: tauri::AppHandle) -> Result<(), String> {
+fn open_chrome_extension_dir(
+    app: tauri::AppHandle,
+    state: tauri::State<Desktop>,
+) -> Result<String, String> {
+    let dir = state.core.store.root.join("chrome-extension");
+    let exported = result(&state.core, flow2api_core::export_chrome_extension(&dir))?;
+    let path_str = exported.to_string_lossy().into_owned();
     app.opener()
-        .open_url("https://www.google.com/chrome/", None::<&str>)
-        .map_err(|e| e.to_string())
+        .open_path(&path_str, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    Ok(path_str)
 }
 #[tauri::command]
 fn open_userscript_url(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
@@ -786,7 +685,7 @@ pub fn run() {
             let summary =
                 MenuItem::with_id(app, "summary", status.tray_summary(), false, None::<&str>)?;
             let details = MenuItem::with_id(app, "details", "等待任务", false, None::<&str>)?;
-            let browser = MenuItem::with_id(app, "browser", "Chrome 未连接", false, None::<&str>)?;
+            let browser = MenuItem::with_id(app, "browser", "浏览器未连接", false, None::<&str>)?;
             let error = MenuItem::with_id(app, "error", "最近错误：无", false, None::<&str>)?;
             let toggle = MenuItem::with_id(app, "toggle", "启动 API 服务", true, None::<&str>)?;
             let check_update_item =
@@ -832,6 +731,7 @@ pub fn run() {
                     &MenuItem::with_id(app, "quit", "退出 Flow2API", true, None::<&str>)?,
                 ],
             )?;
+            #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
             let mut tray_builder = TrayIconBuilder::with_id("flow2api-status")
                 .icon(tray_icon(&status))
                 .tooltip(status.tray_summary())
@@ -1000,7 +900,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             status,
-            preferred_emails,
             settings,
             save_settings,
             magpie_status,
@@ -1012,15 +911,12 @@ pub fn run() {
             save_account,
             temp_disable_account,
             delete_account,
-            configure_account_browser,
-            browser_profiles,
-            choose_browser,
-            open_login,
-            quick_login,
             sync_account,
+            sync_music_account,
             browser_connections,
-            browser_pairing_code,
+            music_connections,
             open_flow_page,
+            open_flow_music_page,
             tasks,
             task_detail,
             cancel_task,
@@ -1034,7 +930,7 @@ pub fn run() {
             migration_reports,
             legacy_history,
             open_data,
-            open_chrome_download,
+            open_chrome_extension_dir,
             open_userscript_url,
             open_media,
             quit,

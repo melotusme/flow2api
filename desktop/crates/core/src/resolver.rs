@@ -261,6 +261,27 @@ fn resolve_with_dimensions(id: &str, body: &Value, dimensions: Option<(u32, u32)
             return resolved.into();
         }
     }
+    let instrumental = body["instrumental"].as_bool() == Some(true);
+    match id {
+        "flow-music" | "producer:standard" => {
+            return if instrumental {
+                "flow-music-instrumental-standard"
+            } else {
+                "flow-music-standard"
+            }
+            .into();
+        }
+        "producer:fast" => {
+            return if instrumental {
+                "flow-music-instrumental-fast"
+            } else {
+                "flow-music-fast"
+            }
+            .into();
+        }
+        "flow-music-instrumental" => return "flow-music-instrumental-standard".into(),
+        _ => {}
+    }
     id.into()
 }
 
@@ -282,8 +303,7 @@ mod tests {
             model: "gemini-3.1-flash-image".into(),
             prompt: "fixture".into(),
             images: vec![data.clone()],
-            account_id: None,
-            video_id: None,
+            ..GenerationRequest::default()
         };
         prepare(&mut request, &json!({}), &Settings::default()).await?;
         assert_eq!(request.model, "gemini-3.1-flash-image-three-four");
@@ -344,8 +364,7 @@ mod tests {
             model: "gemini-3.1-flash-image".into(),
             prompt: "fixture".into(),
             images: vec![url.clone()],
-            account_id: None,
-            video_id: None,
+            ..GenerationRequest::default()
         };
         let settings = Settings::default();
         prepare(&mut request, &json!({}), &settings).await?;

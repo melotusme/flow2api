@@ -129,6 +129,7 @@ impl Store {
             CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS browser_connections (account_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE);
+            CREATE TABLE IF NOT EXISTS music_connections (account_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE);
             CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS task_assets (hash TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS media (filename TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -171,6 +172,19 @@ impl Store {
             task.error = Some("上次运行被中断；为避免重复扣费，没有自动重试".into());
             task.updated_at = now();
             store.save_task(&task)?;
+        }
+        // Clean up legacy User Data paths left on browser-bridge accounts so saving/syncing never hits profile lock checks.
+        for mut account in store.accounts()? {
+            if account.browser_bridge
+                && (!account.browser_data_dir.is_empty() || !account.browser_profile.is_empty())
+            {
+                account.browser_data_dir.clear();
+                account.browser_profile.clear();
+                store.connection.lock().unwrap().execute(
+                    "UPDATE accounts SET value=?2 WHERE id=?1",
+                    params![account.id, serde_json::to_string(&account)?],
+                )?;
+            }
         }
         Ok(store)
     }
@@ -223,6 +237,40 @@ impl Store {
             .lock()
             .unwrap()
             .execute("DELETE FROM browser_connections WHERE account_id=?1", [id])?;
+        Ok(())
+    }
+    pub fn save_music_connection(&self, account: &Account, token_hash: &str) -> Result<()> {
+        let mut connection = self.connection.lock().unwrap();
+        let tx = connection.transaction()?;
+        tx.execute(
+            "INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+            params![account.id, serde_json::to_string(account)?],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO music_connections(account_id,token_hash) VALUES(?1,?2)",
+            params![account.id, token_hash],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn music_connection(&self, hash: &str) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT account_id FROM music_connections WHERE token_hash=?1",
+                [hash],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+    pub fn revoke_music_connection(&self, id: &str) -> Result<()> {
+        self.connection
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM music_connections WHERE account_id=?1", [id])?;
         Ok(())
     }
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
@@ -291,6 +339,7 @@ impl Store {
                 account.note = synced.note.trim().into();
                 account.image_enabled = synced.image_enabled;
                 account.video_enabled = synced.video_enabled;
+                account.music_enabled = synced.music_enabled;
                 connection.execute(
                     "INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
                     params![account.id, serde_json::to_string(&account)?],
@@ -313,7 +362,10 @@ impl Store {
         {
             bail!("端口须为 1–65535，并发须为 1–8，API Key 至少 16 字符");
         }
-        if settings.image_timeout_seconds < 30 || settings.video_timeout_seconds < 30 {
+        if settings.image_timeout_seconds < 30
+            || settings.video_timeout_seconds < 30
+            || settings.music_timeout_seconds < 30
+        {
             bail!("生成超时至少 30 秒");
         }
         if !settings.proxy_url.is_empty() {
@@ -343,27 +395,44 @@ impl Store {
         if account.email.trim().is_empty() || !account.email.contains('@') {
             bail!("请输入 Google 账号邮箱");
         }
-        if account.browser_data_dir.is_empty() && !account.browser_profile.is_empty() {
-            bail!("独立登录模式不能指定已有资料子目录");
-        }
-        if !account.browser_data_dir.is_empty() {
-            let root = Path::new(&account.browser_data_dir)
-                .canonicalize()
-                .unwrap_or_else(|_| PathBuf::from(&account.browser_data_dir));
-            for other in self.accounts()? {
-                if other.id != account.id
-                    && !other.browser_data_dir.is_empty()
-                    && Path::new(&other.browser_data_dir)
-                        .canonicalize()
-                        .ok()
-                        .as_ref()
-                        == Some(&root)
-                {
-                    bail!("该浏览器 User Data 已绑定另一个账号；同一根目录不能并发管理多个账号");
+        let mut stored = account.clone();
+        if stored.browser_bridge {
+            stored.browser_data_dir.clear();
+            stored.browser_profile.clear();
+        } else {
+            if stored.browser_data_dir.is_empty() && !stored.browser_profile.is_empty() {
+                bail!("独立登录模式不能指定已有资料子目录");
+            }
+            if !stored.browser_data_dir.is_empty() {
+                let root = Path::new(&stored.browser_data_dir)
+                    .canonicalize()
+                    .unwrap_or_else(|_| PathBuf::from(&stored.browser_data_dir));
+                let profile = if stored.browser_profile.trim().is_empty() {
+                    "Default"
+                } else {
+                    stored.browser_profile.trim()
+                };
+                for other in self.accounts()? {
+                    if other.id != stored.id
+                        && !other.browser_bridge
+                        && !other.browser_data_dir.is_empty()
+                    {
+                        let other_root = Path::new(&other.browser_data_dir)
+                            .canonicalize()
+                            .unwrap_or_else(|_| PathBuf::from(&other.browser_data_dir));
+                        let other_profile = if other.browser_profile.trim().is_empty() {
+                            "Default"
+                        } else {
+                            other.browser_profile.trim()
+                        };
+                        if other_root == root && other_profile == profile {
+                            bail!("该浏览器资料子目录（{profile}）已绑定另一个账号");
+                        }
+                    }
                 }
             }
         }
-        self.connection.lock().unwrap().execute("INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value", params![account.id, serde_json::to_string(account)?])?;
+        self.connection.lock().unwrap().execute("INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value", params![stored.id, serde_json::to_string(&stored)?])?;
         Ok(())
     }
     pub fn delete_account(&self, id: &str) -> Result<()> {
@@ -459,17 +528,66 @@ mod tests {
         assert!(account.browser_data_dir.is_empty());
         assert!(account.browser_profile.is_empty());
         let directory = tempfile::tempdir()?;
-        let store = Store::open(&directory.path().join("store"))?;
-        account.browser_data_dir = directory.path().to_string_lossy().into_owned();
+        let store_dir = directory.path().join("store");
+        let store = Store::open(&store_dir)?;
+        let user_data = directory.path().to_string_lossy().into_owned();
+        account.browser_data_dir = user_data.clone();
         account.browser_profile = "Default".into();
         store.save_account(&account)?;
-        account.id = "two".into();
-        account.email = "two@example.test".into();
-        assert!(store
-            .save_account(&account)
-            .unwrap_err()
-            .to_string()
-            .contains("另一个账号"));
+
+        // Different Chrome profile under the SAME User Data root is allowed.
+        let mut second = Account {
+            id: "two".into(),
+            email: "two@example.test".into(),
+            enabled: true,
+            browser_data_dir: user_data.clone(),
+            browser_profile: "Profile 6".into(),
+            ..Account::default()
+        };
+        store.save_account(&second)?;
+
+        // Exact same (root, profile) collision on non-bridge accounts is rejected (empty defaults to "Default").
+        second.browser_profile.clear();
+        let err = store.save_account(&second).unwrap_err().to_string();
+        assert!(err.contains("另一个账号"), "unexpected error: {err}");
+        assert!(!err.contains("同一根目录不能并发管理多个账号"));
+
+        // Browser-bridge accounts ignore and clear legacy browser_data_dir / browser_profile.
+        let bridge_acct = Account {
+            id: "bridge-one".into(),
+            email: "bridge@example.test".into(),
+            enabled: true,
+            browser_bridge: true,
+            browser_data_dir: user_data.clone(),
+            browser_profile: "Default".into(),
+            ..Account::default()
+        };
+        store.save_account(&bridge_acct)?;
+        let saved_bridge = store.account("bridge-one")?;
+        assert!(saved_bridge.browser_data_dir.is_empty());
+        assert!(saved_bridge.browser_profile.is_empty());
+
+        // Legacy DB rows with browser_bridge=true and stale browser_data_dir are cleaned on Store::open.
+        let stale_raw = serde_json::json!({
+            "id": "bridge-stale",
+            "email": "stale@example.test",
+            "enabled": true,
+            "project_id": "",
+            "last_synced": null,
+            "credits": null,
+            "browser_bridge": true,
+            "browser_data_dir": user_data,
+            "browser_profile": "Profile 1"
+        });
+        store.connection.lock().unwrap().execute(
+            "INSERT INTO accounts(id,value) VALUES(?1,?2)",
+            params!["bridge-stale", stale_raw.to_string()],
+        )?;
+        drop(store);
+        let reopened = Store::open(&store_dir)?;
+        let cleaned = reopened.account("bridge-stale")?;
+        assert!(cleaned.browser_data_dir.is_empty());
+        assert!(cleaned.browser_profile.is_empty());
         Ok(())
     }
     #[test]
@@ -506,9 +624,7 @@ mod tests {
             request: GenerationRequest {
                 model: "model".into(),
                 prompt: "hello".into(),
-                images: vec![],
-                account_id: None,
-                video_id: None,
+                ..GenerationRequest::default()
             },
             state: "running".into(),
             stage: "submitted".into(),
@@ -556,8 +672,7 @@ mod tests {
                 model: "gemini-3.1-flash-lite-image-square".into(),
                 prompt: "dedupe test".into(),
                 images: vec![image.into()],
-                account_id: None,
-                video_id: None,
+                ..GenerationRequest::default()
             },
             state: state.into(),
             stage: "done".into(),

@@ -9,10 +9,27 @@ use std::sync::OnceLock;
 fn empty(model: &str) -> GenerationRequest {
     GenerationRequest {
         model: model.into(),
-        prompt: String::new(),
-        images: vec![],
-        account_id: None,
-        video_id: None,
+        ..GenerationRequest::default()
+    }
+}
+
+fn apply_music_fields(request: &mut GenerationRequest, body: &Value) {
+    if request.lyrics.is_none() {
+        request.lyrics = body["lyrics"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+    }
+    if request.duration_seconds.is_none() {
+        request.duration_seconds = body["duration_seconds"]
+            .as_u64()
+            .or_else(|| body["seconds"].as_u64())
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(|v| *v >= 10);
+    }
+    if !request.instrumental && body["instrumental"].as_bool() == Some(true) {
+        request.instrumental = true;
     }
 }
 
@@ -53,6 +70,7 @@ pub fn openai(body: &Value) -> Result<GenerationRequest> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned);
+            apply_music_fields(&mut request, body);
             return Ok(request);
         }
         return gemini(model, body);
@@ -101,6 +119,7 @@ pub fn openai(body: &Value) -> Result<GenerationRequest> {
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
     }
+    apply_music_fields(&mut request, body);
     request.prompt = texts
         .into_iter()
         .filter(|s| !s.is_empty())

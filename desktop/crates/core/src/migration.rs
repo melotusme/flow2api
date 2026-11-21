@@ -475,6 +475,7 @@ pub fn import(store: &Store, path: &Path, import_settings: bool) -> Result<Repor
                         images: vec![],
                         account_id: mapping.get(&row["token_id"].to_string()).cloned(),
                         video_id: None,
+                        ..GenerationRequest::default()
                     },
                     state: if old_state == "completed" {
                         "archived"
@@ -572,6 +573,7 @@ pub fn import(store: &Store, path: &Path, import_settings: bool) -> Result<Repor
                     .chars()
                     .take(200)
                     .collect(),
+                ..Media::default()
             };
             let metadata = target.with_extension("json");
             if !metadata.exists() {

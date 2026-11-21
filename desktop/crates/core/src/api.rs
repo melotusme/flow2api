@@ -45,8 +45,20 @@ pub fn router(app: Arc<App>) -> Router {
             post(poll_browser).options(cors_options),
         )
         .route(
+            "/api/music-bridge/pair",
+            post(pair_music_browser).options(cors_options),
+        )
+        .route(
+            "/api/music-bridge/poll",
+            post(poll_music_browser).options(cors_options),
+        )
+        .route(
             "/extension/flow2api-flow-login-sync.user.js",
             get(userscript_content),
+        )
+        .route(
+            "/extension/flow2api-chrome-extension.zip",
+            get(chrome_extension_archive),
         )
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
         .with_state(app)
@@ -118,7 +130,7 @@ fn authorize(
 async fn health(State(app): State<Arc<App>>) -> Json<Value> {
     let s = app.status();
     Json(
-        json!({"status":"healthy","backend_running":true,"service":s.service,"total_tokens":s.total_accounts,"enabled_accounts":s.accounts,"active_tokens":s.ready_accounts,"has_active_tokens":s.ready_accounts>0,"readiness_source":"verified_browser_session","captcha_method":"browser_session","remote_browser_configured":false,"tasks":{"running":s.running,"queued":s.queued,"succeeded":s.succeeded,"failed":s.failed}}),
+        json!({"status":"healthy","backend_running":true,"service":s.service,"total_tokens":s.total_accounts,"enabled_accounts":s.accounts,"active_tokens":s.ready_accounts,"music_active_tokens":s.music_ready_accounts,"has_active_tokens":s.ready_accounts>0,"readiness_source":"verified_browser_session","captcha_method":"browser_session","remote_browser_configured":false,"tasks":{"running":s.running,"queued":s.queued,"succeeded":s.succeeded,"failed":s.failed}}),
     )
 }
 async fn metrics(State(app): State<Arc<App>>) -> Response {
@@ -300,6 +312,18 @@ fn markdown(app: &App, task: &Task) -> String {
         .map(|m| {
             if m.kind == "image" {
                 format!("![生成图片]({address}/media/{})", m.filename)
+            } else if m.kind == "audio" {
+                let mut out = format!(
+                    "<audio src=\"{address}/media/{}\" controls></audio>\nclip ID: {}",
+                    m.filename, m.media_id
+                );
+                if !m.title.is_empty() {
+                    out = format!("### {}\n{out}", m.title);
+                }
+                if !m.lyrics.is_empty() {
+                    out.push_str(&format!("\n\n{}", m.lyrics));
+                }
+                out
             } else {
                 format!(
                     "<video src=\"{address}/media/{}\" controls></video>\nmedia ID: {}",
@@ -402,6 +426,10 @@ fn mime(filename: &str) -> &'static str {
         "webp" => "image/webp",
         "gif" => "image/gif",
         "webm" => "video/webm",
+        "m4a" => "audio/mp4",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
         _ => "video/mp4",
     }
 }
@@ -416,7 +444,10 @@ async fn media(
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "文件不存在".into()))?;
     if hash.len() != 64
         || !hash.bytes().all(|b| b.is_ascii_hexdigit())
-        || !["jpg", "png", "webp", "gif", "mp4", "webm"].contains(&extension)
+        || ![
+            "jpg", "png", "webp", "gif", "mp4", "webm", "m4a", "mp3", "wav", "ogg",
+        ]
+        .contains(&extension)
     {
         return Err(ApiError(StatusCode::NOT_FOUND, "文件不存在".into()));
     }
@@ -514,20 +545,20 @@ fn byte_range(raw: &str, size: u64) -> Option<(u64, u64)> {
     }
 }
 
+fn bridge_cors_headers() -> [(&'static str, &'static str); 4] {
+    [
+        ("access-control-allow-origin", "*"),
+        ("access-control-allow-methods", "GET, POST, OPTIONS"),
+        ("access-control-allow-headers", "*"),
+        ("access-control-allow-private-network", "true"),
+    ]
+}
+
 async fn cors_options() -> Response {
-    (
-        StatusCode::NO_CONTENT,
-        [
-            ("access-control-allow-origin", "*"),
-            ("access-control-allow-methods", "GET, POST, OPTIONS"),
-            ("access-control-allow-headers", "*"),
-        ],
-    )
-        .into_response()
+    (StatusCode::NO_CONTENT, bridge_cors_headers()).into_response()
 }
 
 async fn userscript_content() -> impl IntoResponse {
-    let script = include_str!("../assets/extension/flow2api-flow-login-sync.user.js");
     (
         StatusCode::OK,
         [
@@ -538,15 +569,35 @@ async fn userscript_content() -> impl IntoResponse {
             ),
             ("access-control-allow-origin", "*"),
         ],
-        script,
+        crate::userscript_source(),
     )
+}
+
+async fn chrome_extension_archive() -> Result<Response, ApiError> {
+    let bytes = crate::chrome_extension_zip()?;
+    Ok((
+        StatusCode::OK,
+        [
+            ("content-type", "application/zip"),
+            (
+                "content-disposition",
+                "attachment; filename=\"flow2api-chrome-extension.zip\"",
+            ),
+            ("access-control-allow-origin", "*"),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 async fn sync_browser_login(
     State(_app): State<Arc<App>>,
     Json(_payload): Json<Value>,
 ) -> Result<Response, ApiError> {
-    Err(ApiError(StatusCode::GONE, "旧版 Cookie 搬运已停用。请在应用安装新版连接脚本、获取连接码，再在当前 Flow 标签页连接。支持 Ego Lite 和 Chrome。".into()))
+    Err(ApiError(
+        StatusCode::GONE,
+        "旧版 Cookie 搬运已停用。请在应用安装新版连接脚本，再在当前 Flow 标签页直连。".into(),
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -558,9 +609,14 @@ struct PairBrowser {
 async fn pair_browser(
     State(app): State<Arc<App>>,
     Json(payload): Json<PairBrowser>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Response, ApiError> {
     let (id, token) = app.pair_browser(&payload.code, &payload.email).await?;
-    Ok(Json(json!({"account_id":id,"token":token})))
+    Ok((
+        StatusCode::OK,
+        bridge_cors_headers(),
+        Json(json!({"account_id":id,"token":token})),
+    )
+        .into_response())
 }
 #[derive(serde::Deserialize)]
 struct BrowserPoll {
@@ -575,7 +631,7 @@ async fn poll_browser(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
     Json(payload): Json<BrowserPoll>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Response, ApiError> {
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -612,9 +668,74 @@ async fn poll_browser(
     if needs_refresh {
         app.refresh()?;
     }
-    Ok(Json(
-        json!({"commands":commands,"connection":peer.status()}),
-    ))
+    Ok((
+        StatusCode::OK,
+        bridge_cors_headers(),
+        Json(json!({"commands":commands,"connection":peer.status()})),
+    )
+        .into_response())
+}
+
+async fn pair_music_browser(
+    State(app): State<Arc<App>>,
+    Json(payload): Json<PairBrowser>,
+) -> Result<Response, ApiError> {
+    let (id, token) = app.pair_music_browser(&payload.email).await?;
+    Ok((
+        StatusCode::OK,
+        bridge_cors_headers(),
+        Json(json!({"account_id":id,"token":token})),
+    )
+        .into_response())
+}
+
+async fn poll_music_browser(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Json(payload): Json<BrowserPoll>,
+) -> Result<Response, ApiError> {
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "请重新连接 Flow Music".into()))?;
+    let peer = app.music_peer(token).map_err(|_| {
+        ApiError(
+            StatusCode::UNAUTHORIZED,
+            "Flow Music 连接已失效，请重新连接".into(),
+        )
+    })?;
+    let was_online = peer.online();
+    if payload.resume || !was_online {
+        peer.revalidate();
+    }
+    peer.touch();
+    let commands = if payload.heartbeat {
+        vec![]
+    } else {
+        peer.poll(payload.result).await
+    };
+    let mut needs_refresh = !was_online || payload.resume;
+    if !peer
+        .validating
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        needs_refresh = true;
+        let app = app.clone();
+        let peer = peer.clone();
+        tokio::spawn(async move {
+            app.validate_music_browser(peer).await;
+        });
+    }
+    if needs_refresh {
+        app.refresh()?;
+    }
+    Ok((
+        StatusCode::OK,
+        bridge_cors_headers(),
+        Json(json!({"commands":commands,"connection":peer.status()})),
+    )
+        .into_response())
 }
 
 #[cfg(test)]
@@ -779,9 +900,7 @@ mod tests {
             request: GenerationRequest {
                 model: "gemini-3.1-flash-image-square".into(),
                 prompt: "pending fixture".into(),
-                account_id: None,
-                images: vec![],
-                video_id: None,
+                ..GenerationRequest::default()
             },
             state: "queued".into(),
             stage: "等待执行".into(),
@@ -880,9 +999,7 @@ mod tests {
             request: GenerationRequest {
                 model: "gemini-3.1-flash-image-square".into(),
                 prompt: "prompt".into(),
-                account_id: None,
-                images: vec![],
-                video_id: None,
+                ..GenerationRequest::default()
             },
             state: "failed".into(),
             stage: "failed".into(),
@@ -938,7 +1055,7 @@ mod tests {
             "*"
         );
 
-        // 2. Userscript served
+        // 2. Userscript served with Cargo version parity
         let userscript_req = axum::http::Request::builder()
             .method("GET")
             .uri("/extension/flow2api-flow-login-sync.user.js")
@@ -948,6 +1065,45 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), 100_000).await?;
         let text = String::from_utf8(body.to_vec())?;
         assert!(text.contains("Flow2API 登录态同步"));
+        assert!(text.contains(&format!("// @version      {}", env!("CARGO_PKG_VERSION"))));
+        assert!(text.contains(&format!(
+            "const VERSION = \"{}\";",
+            env!("CARGO_PKG_VERSION")
+        )));
+
+        // 2b. Chrome extension unpacked on App::open & served as ZIP with version parity
+        let unpacked_dir = directory.path().join("chrome-extension");
+        let unpacked_manifest: Value =
+            serde_json::from_slice(&std::fs::read(unpacked_dir.join("manifest.json"))?)?;
+        assert_eq!(unpacked_manifest["version"], env!("CARGO_PKG_VERSION"));
+        for name in [
+            "manifest.json",
+            "background.js",
+            "page-hook.js",
+            "content.js",
+            "icon32.png",
+            "icon128.png",
+        ] {
+            assert!(unpacked_dir.join(name).is_file(), "missing {name}");
+        }
+        let zip_req = axum::http::Request::builder()
+            .method("GET")
+            .uri("/extension/flow2api-chrome-extension.zip")
+            .body(Body::empty())?;
+        let resp: Response = router(app.clone()).oneshot(zip_req).await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/zip"
+        );
+        let zip_bytes = axum::body::to_bytes(resp.into_body(), 5_000_000).await?;
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes.to_vec()))?;
+        assert_eq!(archive.len(), 6);
+        let mut manifest_entry = archive.by_name("manifest.json")?;
+        let mut manifest_str = String::new();
+        std::io::Read::read_to_string(&mut manifest_entry, &mut manifest_str)?;
+        let zip_manifest: Value = serde_json::from_str(&manifest_str)?;
+        assert_eq!(zip_manifest["version"], env!("CARGO_PKG_VERSION"));
 
         // 3. Old cookie transfer is explicitly retired, never falsely accepted.
         let post_req = axum::http::Request::builder()
@@ -972,9 +1128,7 @@ mod tests {
             request: GenerationRequest {
                 model: "veo-3.1-fast-8s-landscape".into(),
                 prompt: "ocean waves".into(),
-                account_id: None,
-                images: vec![],
-                video_id: None,
+                ..GenerationRequest::default()
             },
             state: "queued".into(),
             stage: "等待执行".into(),
@@ -990,6 +1144,7 @@ mod tests {
                 media_id: "media-123".into(),
                 prompt: "ocean waves".into(),
                 model: "veo-3.1-fast-8s-landscape".into(),
+                ..Media::default()
             }],
         };
         app.store.save_task(&queued)?;

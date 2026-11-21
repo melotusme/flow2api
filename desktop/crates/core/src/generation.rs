@@ -263,7 +263,13 @@ impl App {
             .map(|id| id.trim().to_owned())
             .filter(|id| !id.is_empty());
         let model = validate(&request)?;
-        let is_video = model["config"]["type"] == "video";
+        let media_type = model["config"]["type"].as_str().unwrap_or("image");
+        let is_music = media_type == "audio";
+        let type_label = match media_type {
+            "video" => "视频",
+            "audio" => "音乐",
+            _ => "图片",
+        };
         if self.status().queued >= 128 {
             bail!("排队任务过多，请稍后提交");
         }
@@ -281,10 +287,17 @@ impl App {
         let auto_assign = request.account_id.is_none();
         let accounts = self.store.accounts()?;
         let is_ready = |a: &Account| {
-            a.available()
-                && a.supports_kind(is_video)
-                && a.last_synced.is_some()
-                && (!a.browser_bridge || self.bridge.ready(&a.id))
+            if is_music {
+                a.available()
+                    && a.supports_media_type("audio")
+                    && a.music_last_synced.is_some()
+                    && self.music_bridge.ready(&a.id)
+            } else {
+                a.available()
+                    && a.supports_media_type(media_type)
+                    && a.last_synced.is_some()
+                    && (!a.browser_bridge || self.bridge.ready(&a.id))
+            }
         };
         let account = match request.account_id.as_deref() {
             Some(id) => {
@@ -310,14 +323,19 @@ impl App {
                         candidate.email
                     );
                 }
-                if !candidate.supports_kind(is_video) {
+                if !candidate.supports_media_type(media_type) {
                     bail!(
-                        "所选账号 {} 已关闭{}生成开关，请在账号页开启或改用其他账号",
+                        "所选账号 {} 已关闭{type_label}生成开关，请在账号页开启或改用其他账号",
                         candidate.email,
-                        if is_video { "视频" } else { "图片" }
                     );
                 }
                 if !is_ready(&candidate) {
+                    if is_music {
+                        bail!(
+                            "所选账号 {} 尚未连接 Flow Music，请在浏览器打开 flowmusic.app 并保持页面打开",
+                            candidate.email
+                        );
+                    }
                     bail!(
                         "所选账号 {} 尚未完成登录同步或浏览器连接未就绪",
                         candidate.email
@@ -332,7 +350,7 @@ impl App {
                     .any(|a| a.enabled && a.temporarily_disabled());
                 let has_kind_disabled = accounts
                     .iter()
-                    .any(|a| a.available() && !a.supports_kind(is_video));
+                    .any(|a| a.available() && !a.supports_media_type(media_type));
                 accounts
                     .into_iter()
                     .filter(is_ready)
@@ -344,8 +362,11 @@ impl App {
                             )
                         } else if has_kind_disabled {
                             anyhow::anyhow!(
-                                "没有开启{}生成且完成同步的可用账号，请在账号页检查能力开关",
-                                if is_video { "视频" } else { "图片" }
+                                "没有开启{type_label}生成且完成同步的可用账号，请在账号页检查能力开关"
+                            )
+                        } else if is_music {
+                            anyhow::anyhow!(
+                                "没有已连接的 Flow Music 账号，请在浏览器打开 flowmusic.app 并登录"
                             )
                         } else {
                             anyhow::anyhow!("没有已启用且完成登录同步的账号")
@@ -423,7 +444,7 @@ impl App {
     }
     fn pick_ready_account(
         &self,
-        is_video: bool,
+        media_type: &str,
         excluded: &HashSet<String>,
     ) -> Result<Option<Account>> {
         let accounts = self.store.accounts()?;
@@ -433,9 +454,12 @@ impl App {
             .filter(|a| {
                 !excluded.contains(&a.id)
                     && a.available()
-                    && a.supports_kind(is_video)
-                    && a.last_synced.is_some()
-                    && (!a.browser_bridge || self.bridge.ready(&a.id))
+                    && a.supports_media_type(media_type)
+                    && if media_type == "audio" {
+                        a.music_last_synced.is_some() && self.music_bridge.ready(&a.id)
+                    } else {
+                        a.last_synced.is_some() && (!a.browser_bridge || self.bridge.ready(&a.id))
+                    }
             })
             .min_by_key(|a| account_load(a, &tasks)))
     }
@@ -461,11 +485,11 @@ impl App {
         drop(admission);
         let settings = self.store.settings()?;
         let model = validate(&task.request)?;
-        let is_video = model["config"]["type"] == "video";
-        let timeout_seconds = if model["config"]["type"] == "image" {
-            settings.image_timeout_seconds
-        } else {
-            settings.video_timeout_seconds
+        let media_type = model["config"]["type"].as_str().unwrap_or("image");
+        let timeout_seconds = match media_type {
+            "image" => settings.image_timeout_seconds,
+            "audio" => settings.music_timeout_seconds,
+            _ => settings.video_timeout_seconds,
         };
 
         let mut excluded: HashSet<String> = HashSet::new();
@@ -476,29 +500,45 @@ impl App {
             let account_id = task.request.account_id.clone().context("任务缺少账号")?;
             let account = self.store.account(&account_id)?;
             let mut submitted = false;
-            let outcome: Result<(Account, Vec<Media>)> = async {
-                let session = self.account_session(&account).await?;
-                // Sessions serialize requests for one Google account. Waiting for another
-                // task's browser must not consume this task's generation deadline.
-                let mut session = session.lock().await;
-                // A previous task may have created the project while this one waited.
-                let mut fresh = self.store.account(&account.id)?;
-                let media = timeout(
-                    Duration::from_secs(timeout_seconds),
-                    self.generate(
-                        &task,
-                        &model,
-                        &settings,
-                        &mut session,
-                        &mut fresh,
-                        &mut submitted,
-                    ),
-                )
+            let outcome: Result<(Account, Vec<Media>)> = if media_type == "audio" {
+                async {
+                    let mut fresh = self.store.account(&account.id)?;
+                    let media = timeout(
+                        Duration::from_secs(timeout_seconds),
+                        self.generate_music(&task, &model, &settings, &mut fresh, &mut submitted),
+                    )
+                    .await
+                    .context(
+                        "音乐生成超时，Flow Music 可能仍在渲染；请打开 flowmusic.app 核对结果",
+                    )??;
+                    Ok((fresh, media))
+                }
                 .await
-                .context("生成超时，Flow 可能仍在执行；请核对上游结果后决定是否重试")??;
-                Ok((fresh, media))
-            }
-            .await;
+            } else {
+                async {
+                    let session = self.account_session(&account).await?;
+                    // Sessions serialize requests for one Google account. Waiting for another
+                    // task's browser must not consume this task's generation deadline.
+                    let mut session = session.lock().await;
+                    // A previous task may have created the project while this one waited.
+                    let mut fresh = self.store.account(&account.id)?;
+                    let media = timeout(
+                        Duration::from_secs(timeout_seconds),
+                        self.generate(
+                            &task,
+                            &model,
+                            &settings,
+                            &mut session,
+                            &mut fresh,
+                            &mut submitted,
+                        ),
+                    )
+                    .await
+                    .context("生成超时，Flow 可能仍在执行；请核对上游结果后决定是否重试")??;
+                    Ok((fresh, media))
+                }
+                .await
+            };
 
             match outcome {
                 Ok((mut account, media)) => {
@@ -534,7 +574,7 @@ impl App {
                         && (kind != Some(FailoverKind::Risk) || risk_switches < MAX_RISK_FAILOVERS);
 
                     if can_switch {
-                        if let Ok(Some(next)) = self.pick_ready_account(is_video, &excluded) {
+                        if let Ok(Some(next)) = self.pick_ready_account(media_type, &excluded) {
                             if kind == Some(FailoverKind::Risk) {
                                 risk_switches += 1;
                             }
@@ -846,16 +886,38 @@ impl App {
         task_id: &str,
         media_id: &str,
     ) -> Result<Media> {
+        self.archive_bytes_with_meta(
+            bytes,
+            kind,
+            task_id,
+            media_id,
+            String::new(),
+            String::new(),
+            String::new(),
+        )
+        .await
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn archive_bytes_with_meta(
+        &self,
+        bytes: &[u8],
+        kind: &str,
+        task_id: &str,
+        media_id: &str,
+        title: String,
+        lyrics: String,
+        sound_prompt: String,
+    ) -> Result<Media> {
         if bytes.len() > 512 * 1024 * 1024 {
             bail!("作品超出 512 MB 保存限制");
         }
         let extension = media_extension(bytes, kind)?;
-        let filename = format!("{:x}.{extension}", Sha256::digest(&bytes));
+        let filename = format!("{:x}.{extension}", Sha256::digest(bytes));
         let directory = self.store.root.join("generated");
         let target = directory.join(&filename);
         if !target.exists() {
             let temporary = directory.join(format!("{}.tmp", uuid::Uuid::new_v4()));
-            tokio::fs::write(&temporary, &bytes)
+            tokio::fs::write(&temporary, bytes)
                 .await
                 .context("作品写入失败，请检查磁盘空间")?;
             tokio::fs::rename(&temporary, &target)
@@ -881,6 +943,9 @@ impl App {
             media_id: media_id.into(),
             prompt,
             model,
+            title,
+            lyrics,
+            sound_prompt,
         };
         tokio::fs::write(
             target.with_extension("json"),
@@ -1113,7 +1178,7 @@ fn encoded_image(value: &Value) -> Option<Vec<u8>> {
     }
 }
 
-fn http_client(settings: &Settings) -> Result<reqwest::Client> {
+pub(crate) fn http_client(settings: &Settings) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(120));
@@ -1186,6 +1251,21 @@ pub fn media_extension(bytes: &[u8], kind: &str) -> Result<&'static str> {
         if bytes.starts_with(b"GIF8") {
             return Ok("gif");
         }
+    } else if kind == "audio" {
+        if bytes.get(4..8) == Some(b"ftyp") {
+            return Ok("m4a");
+        }
+        if bytes.starts_with(b"ID3")
+            || (bytes.len() >= 2 && bytes[0] == 0xff && (bytes[1] & 0xe0) == 0xe0)
+        {
+            return Ok("mp3");
+        }
+        if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE") {
+            return Ok("wav");
+        }
+        if bytes.starts_with(b"OggS") {
+            return Ok("ogg");
+        }
     } else {
         if bytes.get(4..8) == Some(b"ftyp") {
             return Ok("mp4");
@@ -1194,7 +1274,7 @@ pub fn media_extension(bytes: &[u8], kind: &str) -> Result<&'static str> {
             return Ok("webm");
         }
     }
-    bail!("下载内容不是预期的图片／视频，未将错误页面保存为作品")
+    bail!("下载内容不是预期的图片／视频／音频，未将错误页面保存为作品")
 }
 
 #[cfg(test)]
@@ -1207,8 +1287,7 @@ mod tests {
                 model: "gemini-3.1-flash-lite-image-square".into(),
                 prompt: "test".into(),
                 images: vec!["data:image/png;base64,large-reference".into()],
-                account_id: None,
-                video_id: None,
+                ..GenerationRequest::default()
             },
             state: state.into(),
             stage: "waiting".into(),
@@ -1283,9 +1362,8 @@ mod tests {
             request: GenerationRequest {
                 model: String::new(),
                 prompt: String::new(),
-                images: vec![],
                 account_id: Some(first.id.clone()),
-                video_id: None,
+                ..GenerationRequest::default()
             },
             state: "succeeded".into(),
             stage: String::new(),
@@ -1313,9 +1391,7 @@ mod tests {
             request: GenerationRequest {
                 model: "gemini-3.1-flash-image-square".into(),
                 prompt: "yellow teapot".into(),
-                images: vec![],
-                account_id: None,
-                video_id: None,
+                ..GenerationRequest::default()
             },
             state: "running".into(),
             stage: String::new(),
@@ -1463,20 +1539,21 @@ mod tests {
 
         let mut excluded = HashSet::new();
         assert_eq!(
-            app.pick_ready_account(true, &excluded)?.map(|a| a.id),
+            app.pick_ready_account("video", &excluded)?.map(|a| a.id),
             Some("a1".into())
         );
         excluded.insert("a1".into());
         // a3 has video_enabled=false, so failover for video skips directly to a2
         assert_eq!(
-            app.pick_ready_account(true, &excluded)?.map(|a| a.id),
+            app.pick_ready_account("video", &excluded)?.map(|a| a.id),
             Some("a2".into())
         );
         // After a1 cools down, it's also skipped without explicit exclusion
         a1.disabled_until = Some(after_minutes(15));
         app.store.save_account(&a1)?;
         assert_eq!(
-            app.pick_ready_account(true, &HashSet::new())?.map(|a| a.id),
+            app.pick_ready_account("video", &HashSet::new())?
+                .map(|a| a.id),
             Some("a2".into())
         );
         Ok(())

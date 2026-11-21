@@ -9,6 +9,10 @@ pub fn after_minutes(minutes: i64) -> String {
     (Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339()
 }
 
+pub fn default_music_timeout() -> u64 {
+    600
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -18,6 +22,8 @@ pub struct Settings {
     pub max_concurrent: usize,
     pub image_timeout_seconds: u64,
     pub video_timeout_seconds: u64,
+    #[serde(default = "default_music_timeout")]
+    pub music_timeout_seconds: u64,
     pub proxy_url: String,
     pub auto_update: bool,
 }
@@ -31,6 +37,7 @@ impl Default for Settings {
             max_concurrent: 1,
             image_timeout_seconds: 300,
             video_timeout_seconds: 1500,
+            music_timeout_seconds: default_music_timeout(),
             proxy_url: String::new(),
             auto_update: true,
         }
@@ -51,6 +58,7 @@ pub struct SyncedAccount {
     pub note: String,
     pub image_enabled: bool,
     pub video_enabled: bool,
+    pub music_enabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -79,6 +87,14 @@ pub struct Account {
     pub image_enabled: bool,
     #[serde(default = "default_true")]
     pub video_enabled: bool,
+    #[serde(default = "default_true")]
+    pub music_enabled: bool,
+    #[serde(default)]
+    pub music_credits: Option<i64>,
+    #[serde(default)]
+    pub music_plan: String,
+    #[serde(default)]
+    pub music_last_synced: Option<String>,
     #[serde(default)]
     pub last_error: Option<String>,
     #[serde(default)]
@@ -103,6 +119,10 @@ impl Default for Account {
             note: String::new(),
             image_enabled: true,
             video_enabled: true,
+            music_enabled: true,
+            music_credits: None,
+            music_plan: String::new(),
+            music_last_synced: None,
             last_error: None,
             consecutive_failures: 0,
         }
@@ -128,9 +148,16 @@ impl Account {
             self.image_enabled
         }
     }
+    pub fn supports_media_type(&self, media_type: &str) -> bool {
+        match media_type {
+            "video" => self.video_enabled,
+            "audio" => self.music_enabled,
+            _ => self.image_enabled,
+        }
+    }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GenerationRequest {
     pub model: String,
     pub prompt: String,
@@ -140,6 +167,12 @@ pub struct GenerationRequest {
     pub images: Vec<String>,
     #[serde(default)]
     pub video_id: Option<String>,
+    #[serde(default)]
+    pub lyrics: Option<String>,
+    #[serde(default)]
+    pub duration_seconds: Option<u32>,
+    #[serde(default)]
+    pub instrumental: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -154,7 +187,7 @@ pub struct Task {
     pub results: Vec<Media>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Media {
     pub filename: String,
     pub kind: String,
@@ -166,6 +199,12 @@ pub struct Media {
     pub prompt: String,
     #[serde(default)]
     pub model: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub lyrics: String,
+    #[serde(default)]
+    pub sound_prompt: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -179,6 +218,8 @@ pub struct Status {
     pub accounts: usize,
     pub total_accounts: usize,
     pub ready_accounts: usize,
+    #[serde(default)]
+    pub music_ready_accounts: usize,
     pub browser: String,
     pub last_error: Option<String>,
     pub data_dir: String,

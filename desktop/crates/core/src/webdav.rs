@@ -61,6 +61,8 @@ struct PortableAccount {
     image_enabled: bool,
     #[serde(default = "crate::model::default_true")]
     video_enabled: bool,
+    #[serde(default = "crate::model::default_true")]
+    music_enabled: bool,
 }
 
 trait Secrets: Send + Sync {
@@ -313,6 +315,7 @@ fn portable_from(store: &Store) -> Result<Portable, String> {
             note: account.note,
             image_enabled: account.image_enabled,
             video_enabled: account.video_enabled,
+            music_enabled: account.music_enabled,
         })
         .collect();
     let portable = Portable {
@@ -360,6 +363,7 @@ impl Portable {
                 note: account.note.clone(),
                 image_enabled: account.image_enabled,
                 video_enabled: account.video_enabled,
+                music_enabled: account.music_enabled,
             })
             .collect()
     }
@@ -661,6 +665,7 @@ mod tests {
                         note: "主力号".into(),
                         image_enabled: true,
                         video_enabled: false,
+                        music_enabled: true,
                     },
                     SyncedAccount {
                         id: "cloud".into(),
@@ -671,6 +676,7 @@ mod tests {
                         note: String::new(),
                         image_enabled: true,
                         video_enabled: true,
+                        music_enabled: true,
                     },
                 ],
             )

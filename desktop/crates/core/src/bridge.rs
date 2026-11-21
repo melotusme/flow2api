@@ -187,7 +187,7 @@ impl Hub {
             .map(|p| p.status())
             .collect()
     }
-    fn connect(&self, id: &str) -> Arc<Peer> {
+    pub(crate) fn connect(&self, id: &str) -> Arc<Peer> {
         let mut peers = self.peers.lock().unwrap();
         if let Some(previous) = peers.remove(id) {
             previous.disconnect();
@@ -196,7 +196,7 @@ impl Hub {
         peers.insert(id.into(), peer.clone());
         peer
     }
-    fn resume(&self, id: &str) -> Arc<Peer> {
+    pub(crate) fn resume(&self, id: &str) -> Arc<Peer> {
         let mut peers = self.peers.lock().unwrap();
         peers
             .entry(id.into())
@@ -214,7 +214,7 @@ impl Hub {
         }
     }
 }
-fn digest(token: &str) -> String {
+pub(crate) fn digest(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
 }
 
@@ -405,6 +405,8 @@ impl App {
                 ..Account::default()
             });
         account.browser_bridge = true;
+        account.browser_data_dir.clear();
+        account.browser_profile.clear();
         account.last_synced = None;
         let token = format!(
             "{}{}",
