@@ -4,7 +4,7 @@
 
 ## 开发与运行
 
-开发机器需要 Rust、Tauri 2 CLI，以及对应系统的编译工具。Windows 使用 MSVC C++ 工具与 WebView2；macOS 使用 Xcode Command Line Tools。使用者安装成品应用后不需要 Rust、Python、Node 或 Docker。v0.4.0 默认通过内置 Chrome 扩展（免配置，无需 Tampermonkey）或油猴连接脚本（v0.4.0）复用系统默认浏览器里的 Flow 与 Flow Music 登录，支持 Chrome、Ego Lite 等；Cookie 与令牌留在原浏览器。专用 Chrome 独立登录保留在高级选项。详见 [浏览器连接](../docs/browser-connection.md)。
+开发机器需要 Rust、Tauri 2 CLI，以及对应系统的编译工具。Windows 使用 MSVC C++ 工具与 WebView2；macOS 使用 Xcode Command Line Tools。使用者安装成品应用后不需要 Rust、Python、Node 或 Docker。v0.4.1 默认显式调用本机真实 **Google Chrome** 对应用户配置，通过内置 Chrome 扩展（一键拖入免配置，已打开标签页免刷新即刻直连，无需 Tampermonkey）或油猴连接脚本（v0.4.1）复用已登录的 Flow 与 Flow Music 会话，绝不拉起无登录态的受控调试 Chrome；Cookie 与令牌始终留在原浏览器。详见 [浏览器连接](../docs/browser-connection.md)。
 
 ```bash
 # 从项目根目录运行测试

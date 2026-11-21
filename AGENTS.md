@@ -34,3 +34,10 @@ curl -s localhost:8000/health
 - 公开仓库的 Actions 免费，不受以上额度限制。
 - 本项目现状（2026-11-07 起）：相关仓库全部公开——源码 fork `melotusme/flow2api`、发行仓库 `melotusme/flow2api-releases`、tap `melotusme/homebrew-flow2api`。公开仓库 Actions 免费，发布直接走发行仓库的 CI（含 macOS），不需要本机打包上传。应用更新匿名读取公开 Release，不需要 GitHub 登录。
 - 不要把个人邮箱、本机绝对路径、机器名写进代码或文档：这个仓库是公开的。
+
+## 浏览器实机测试约束（必须遵守）
+
+- **必须使用 Google Chrome 测试与直连，禁止使用 Ego lite（`ego-browser`）**：
+  - 用户的 Google Flow（`flow.google.com`）与 Flow Music（`flowmusic.app`）登录态、高阶订阅配额及直连扩展均保存在日常使用的 **Google Chrome** 中。
+  - 本项目的一切浏览器实机调试、连接排查与端到端验收**必须使用已登录的 Google Chrome**（例如通过 `chrome-devtools` `--autoConnect` 连接真实 Google Chrome 实例），**严禁使用 `ego-browser`（Ego lite）**，也严禁拉起无登录态的独立受控调试浏览器（`--user-data-dir` 隔离目录）。
+  - 桌面端内所有打开浏览器的入口（打开 Flow、打开 Flow Music、安装 Chrome 插件、安装油猴脚本、账号同步自动唤起页面）必须优先显式调用系统 **Google Chrome**（并按账号邮箱自动匹配对应的 `--profile-directory`），不得直接依赖系统默认浏览器（避免在默认浏览器设为 Ego lite 的设备上误打开 Ego lite）。

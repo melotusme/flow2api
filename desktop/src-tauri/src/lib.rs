@@ -129,17 +129,121 @@ fn browser_connections(
 fn music_connections(state: tauri::State<Desktop>) -> Vec<flow2api_core::bridge::ConnectionStatus> {
     state.core.music_bridge.statuses()
 }
+#[derive(serde::Serialize)]
+struct InstallExtensionResult {
+    dir: String,
+    profile: Option<String>,
+    opened_browser: bool,
+    opened_folder: bool,
+}
+
 #[tauri::command]
-fn open_flow_page(app: tauri::AppHandle) -> Result<(), String> {
-    app.opener()
-        .open_url("https://flow.google.com/projects", None::<&str>)
-        .map_err(|e| e.to_string())
+fn list_chrome_profiles(
+    state: tauri::State<Desktop>,
+) -> Vec<flow2api_core::browser::ChromeProfileInfo> {
+    let ext_dir = state.core.store.root.join("chrome-extension");
+    let _ = flow2api_core::export_chrome_extension(&ext_dir);
+    flow2api_core::browser::inspect_chrome_profiles(&ext_dir)
+}
+
+#[tauri::command]
+fn open_url_in_chrome_profile(
+    app: tauri::AppHandle,
+    state: tauri::State<Desktop>,
+    profile: Option<String>,
+    email: Option<String>,
+    target: Option<String>,
+) -> Result<Option<String>, String> {
+    let url = match target.as_deref() {
+        Some("music") => "https://www.flowmusic.app/session",
+        _ => "https://flow.google.com/projects",
+    };
+    let ext_dir = state.core.store.root.join("chrome-extension");
+    let resolved_profile = profile
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            email
+                .as_deref()
+                .and_then(|e| flow2api_core::browser::find_chrome_profile_for_email(&ext_dir, e))
+                .map(|p| p.profile)
+        })
+        .or_else(|| {
+            let mut enabled_accounts = state.core.store.accounts().unwrap_or_default();
+            enabled_accounts.retain(|a| a.enabled);
+            enabled_accounts.sort_by(|a, b| b.priority.cmp(&a.priority));
+            enabled_accounts.into_iter().find_map(|a| {
+                flow2api_core::browser::find_chrome_profile_for_email(&ext_dir, &a.email)
+                    .map(|p| p.profile)
+            })
+        });
+    let browser_exe = state
+        .core
+        .store
+        .settings()
+        .map(|s| s.browser_executable)
+        .unwrap_or_default();
+    let opened = flow2api_core::browser::open_in_chrome_profile(
+        &browser_exe,
+        resolved_profile.as_deref(),
+        url,
+    )
+    .map_err(|e| e.to_string())?;
+    if !opened {
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(resolved_profile)
+}
+
+#[tauri::command]
+fn install_chrome_extension_for_profile(
+    app: tauri::AppHandle,
+    state: tauri::State<Desktop>,
+    profile: Option<String>,
+) -> Result<InstallExtensionResult, String> {
+    let dir = state.core.store.root.join("chrome-extension");
+    let exported = result(&state.core, flow2api_core::export_chrome_extension(&dir))?;
+    let clean_profile = profile
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let browser_exe = state
+        .core
+        .store
+        .settings()
+        .map(|s| s.browser_executable)
+        .unwrap_or_default();
+    let opened_browser = flow2api_core::browser::open_in_chrome_profile(
+        &browser_exe,
+        clean_profile.as_deref(),
+        "chrome://extensions/",
+    )
+    .unwrap_or(false);
+    let mut opened_folder = flow2api_core::browser::reveal_extension_folder(&exported);
+    if !opened_folder {
+        opened_folder = app
+            .opener()
+            .open_path(exported.to_string_lossy(), None::<&str>)
+            .is_ok();
+    }
+    Ok(InstallExtensionResult {
+        dir: exported.to_string_lossy().into_owned(),
+        profile: clean_profile,
+        opened_browser,
+        opened_folder,
+    })
+}
+
+#[tauri::command]
+fn open_flow_page(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
+    let _ = open_url_in_chrome_profile(app, state, None, None, Some("flow".into()))?;
+    Ok(())
 }
 #[tauri::command]
-fn open_flow_music_page(app: tauri::AppHandle) -> Result<(), String> {
-    app.opener()
-        .open_url("https://www.flowmusic.app/session", None::<&str>)
-        .map_err(|e| e.to_string())
+fn open_flow_music_page(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
+    let _ = open_url_in_chrome_profile(app, state, None, None, Some("music".into()))?;
+    Ok(())
 }
 #[tauri::command]
 async fn save_account(
@@ -257,8 +361,49 @@ async fn delete_account(state: tauri::State<'_, Desktop>, id: String) -> Result<
     result(&state.core, state.core.refresh())
 }
 #[tauri::command]
-async fn sync_account(state: tauri::State<'_, Desktop>, id: String) -> Result<Account, String> {
-    result(&state.core, state.core.sync_account(&id).await)
+async fn sync_account(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Desktop>,
+    id: String,
+) -> Result<Account, String> {
+    if state.core.bridge.online(&id) {
+        return result(&state.core, state.core.sync_account(&id).await);
+    }
+    let account = result(&state.core, state.core.store.account(&id))?;
+    let ext_dir = state.core.store.root.join("chrome-extension");
+    let _ = flow2api_core::export_chrome_extension(&ext_dir);
+    let matched = flow2api_core::browser::find_chrome_profile_for_email(&ext_dir, &account.email);
+    let _ = open_url_in_chrome_profile(
+        app,
+        state.clone(),
+        matched.as_ref().map(|p| p.profile.clone()),
+        Some(account.email.clone()),
+        Some("flow".into()),
+    );
+    for _ in 0..30 {
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        if state.core.bridge.ready(&id) {
+            return result(&state.core, state.core.store.account(&id));
+        }
+        if state.core.bridge.online(&id) {
+            return result(&state.core, state.core.sync_account(&id).await);
+        }
+    }
+    let msg = match matched {
+        Some(prof) if !prof.extension_installed => format!(
+            "已在 Chrome（{} · {}）打开 Flow，但该配置尚未安装 Flow2API 插件：请在「本机 Chrome 配置」点击「一键安装插件」将高亮文件夹拖入扩展页即可自动同步",
+            prof.name, prof.profile
+        ),
+        Some(prof) => format!(
+            "已在 Chrome（{} · {}）打开 Flow 页面；请确认页面已登录 {} 并保持标签页打开，扩展连接后将自动同步余额",
+            prof.name, prof.profile, account.email
+        ),
+        None => format!(
+            "已在浏览器打开 Flow 页面；请确认已安装 Flow2API Chrome 插件并登录 {}，连接后将自动同步余额",
+            account.email
+        ),
+    };
+    Err(msg)
 }
 #[tauri::command]
 async fn sync_music_account(
@@ -417,21 +562,34 @@ fn open_chrome_extension_dir(
     app: tauri::AppHandle,
     state: tauri::State<Desktop>,
 ) -> Result<String, String> {
-    let dir = state.core.store.root.join("chrome-extension");
-    let exported = result(&state.core, flow2api_core::export_chrome_extension(&dir))?;
-    let path_str = exported.to_string_lossy().into_owned();
-    app.opener()
-        .open_path(&path_str, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    Ok(path_str)
+    install_chrome_extension_for_profile(app, state, None).map(|r| r.dir)
 }
 #[tauri::command]
 fn open_userscript_url(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
-    let port = state.core.store.settings().map(|s| s.port).unwrap_or(8000);
+    let settings = state.core.store.settings().unwrap_or_default();
+    let port = settings.port;
     let url = format!("http://127.0.0.1:{port}/extension/flow2api-flow-login-sync.user.js");
-    app.opener()
-        .open_url(&url, None::<&str>)
-        .map_err(|e| e.to_string())
+    let ext_dir = state.core.store.root.join("chrome-extension");
+    let preferred_profile = state.core.store.accounts().ok().and_then(|mut list| {
+        list.retain(|a| a.enabled);
+        list.sort_by(|a, b| b.priority.cmp(&a.priority));
+        list.into_iter().find_map(|a| {
+            flow2api_core::browser::find_chrome_profile_for_email(&ext_dir, &a.email)
+                .map(|p| p.profile)
+        })
+    });
+    let opened = flow2api_core::browser::open_in_chrome_profile(
+        &settings.browser_executable,
+        preferred_profile.as_deref(),
+        &url,
+    )
+    .map_err(|e| e.to_string())?;
+    if !opened {
+        app.opener()
+            .open_url(&url, None::<&str>)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 #[tauri::command]
 fn open_data(app: tauri::AppHandle, state: tauri::State<Desktop>) -> Result<(), String> {
@@ -915,6 +1073,9 @@ pub fn run() {
             sync_music_account,
             browser_connections,
             music_connections,
+            list_chrome_profiles,
+            open_url_in_chrome_profile,
+            install_chrome_extension_for_profile,
             open_flow_page,
             open_flow_music_page,
             tasks,

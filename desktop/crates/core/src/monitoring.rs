@@ -86,6 +86,11 @@ mod tests {
         for (enabled, synced) in [(true, false), (true, true), (false, true), (true, false)] {
             account.enabled = enabled;
             account.last_synced = synced.then(crate::model::now);
+            if synced {
+                app.bridge.connect(&account.id).set_state("ready", "ok");
+            } else {
+                app.bridge.remove(&account.id);
+            }
             app.store.save_account(&account)?;
             app.refresh()?;
             let router = crate::api::router(app.clone());

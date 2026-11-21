@@ -162,11 +162,7 @@ impl App {
         if let Ok(accounts) = self.store.accounts() {
             status.ready_accounts = accounts
                 .iter()
-                .filter(|a| {
-                    a.available()
-                        && a.last_synced.is_some()
-                        && (!a.browser_bridge || self.bridge.ready(&a.id))
-                })
+                .filter(|a| a.available() && a.last_synced.is_some() && self.bridge.ready(&a.id))
                 .count();
             status.music_ready_accounts = accounts
                 .iter()
@@ -179,7 +175,7 @@ impl App {
                 .count();
             let flow_connected = accounts
                 .iter()
-                .filter(|a| a.available() && a.browser_bridge && self.bridge.ready(&a.id))
+                .filter(|a| a.available() && self.bridge.ready(&a.id))
                 .count();
             let music_connected = status.music_ready_accounts;
             if flow_connected > 0 || music_connected > 0 {
@@ -191,7 +187,7 @@ impl App {
                     parts.push(format!("Music {music_connected}"));
                 }
                 status.browser = format!("已连接 · {}", parts.join(" · "));
-            } else if accounts.iter().any(|a| a.available() && a.browser_bridge) {
+            } else if accounts.iter().any(|a| a.available()) {
                 status.browser = "浏览器未连接".into();
             }
         }
@@ -213,11 +209,7 @@ impl App {
             s.accounts = accounts.iter().filter(|a| a.available()).count();
             s.ready_accounts = accounts
                 .iter()
-                .filter(|a| {
-                    a.available()
-                        && a.last_synced.is_some()
-                        && (!a.browser_bridge || self.bridge.ready(&a.id))
-                })
+                .filter(|a| a.available() && a.last_synced.is_some() && self.bridge.ready(&a.id))
                 .count();
             s.music_ready_accounts = accounts
                 .iter()

@@ -1,9 +1,9 @@
 /* All privileged operations use local Tauri commands; no credentials go to remote pages. */
 'use strict';
-let APP_VERSION='0.4.0';
+let APP_VERSION='0.4.1';
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
-const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],musicConnections:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
+const state = {status:null,models:[],accounts:[],tasks:[],media:[],legacyRecords:[],settings:null,images:[],page:'studio',connections:[],musicConnections:[],chromeProfiles:[],submitting:false,loadingImages:false,activeTaskId:null,monitorKey:''};
 const labels = {queued:'排队中',running:'生成中',succeeded:'已保存',failed:'失败',interrupted:'已中断',cancelled:'已取消',archived:'旧版已完成'};
 const titles = {studio:'创作工作台',tasks:'任务与进度',library:'本机作品',accounts:'Google 账号',settings:'设置与接入'};
 let noticeTimer=null,noticeSticky=false,noticePaused=false;
@@ -865,7 +865,7 @@ function accountSupportsKind(a,kind){
 
 function accountFlowOnline(a){
   const connection=state.connections.find(c=>c.account_id===a.id);
-  return !a.browser_bridge||Boolean(connection?.connected&&connection.state==='ready');
+  return Boolean(connection?.connected&&connection.state==='ready');
 }
 
 function accountMusicOnline(a){
@@ -1022,8 +1022,8 @@ function openAccountDialog(account){
   maintenance.append(node('span','维护操作','account-dialog-label'));
   const maintActions=node('div',undefined,'actions');
   maintActions.append(
-    button('打开 Flow ↗',()=>invoke('open_flow_page')),
-    button('打开 Flow Music ↗',()=>invoke('open_flow_music_page')),
+    button('打开此号 Flow ↗',()=>invoke('open_url_in_chrome_profile',{email:account.email,target:'flow'})),
+    button('打开 Flow Music ↗',()=>invoke('open_url_in_chrome_profile',{email:account.email,target:'music'})),
     button('同步 Flow',async()=>{
       await invoke('sync_account',{id:account.id});
       await refresh();
@@ -1141,10 +1141,13 @@ function accountCard(account){
     else if(connection?.connected&&connection.message)connParts.push(`Flow：${connection.message}`);
     if(musicOnline)connParts.push('Music 已连接');
     else if(musicConn?.connected&&musicConn.message)connParts.push(`Music：${musicConn.message}`);
+    const matchedProfile=state.chromeProfiles.find(p=>p.email&&p.email.toLowerCase()===account.email.toLowerCase());
     if(connParts.length){
       metaParts.push(connParts.join(' · '));
-    }else if(!account.browser_bridge){
-      metaParts.push('旧版账号 · 在默认浏览器打开 Flow 重新直连');
+    }else if(matchedProfile&&!matchedProfile.extension_installed){
+      metaParts.push(`未连接 · 对应 Chrome（${matchedProfile.name}）尚未安装插件，点右侧「一键装插件」拖入即可`);
+    }else if(matchedProfile){
+      metaParts.push(`未连接 · 对应 Chrome（${matchedProfile.name} · ${matchedProfile.profile}），点「同步」自动打开并连接`);
     }else{
       metaParts.push('未连接 · 打开 Flow 或 Flow Music 页面即可自动同步');
     }
@@ -1171,6 +1174,7 @@ function accountCard(account){
   }
 
   const actions=node('div',undefined,'actions');
+  const matchedProfile=state.chromeProfiles.find(p=>p.email&&p.email.toLowerCase()===account.email.toLowerCase());
   if(tempDisabled){
     actions.append(button('解除冷却',async()=>{
       await invoke('temp_disable_account',{id:account.id,minutes:0,reason:null});
@@ -1192,8 +1196,21 @@ function accountCard(account){
       if(errs.length)notice(errs.join('；'),true);
       else notice(`${account.email} 最新状态与积分已同步。`);
     }));
+  }else if(matchedProfile&&!matchedProfile.extension_installed){
+    actions.append(
+      button('一键装插件 ↗',()=>installExtensionForProfile(matchedProfile.profile,matchedProfile.name),'primary'),
+      button('打开 Flow ↗',()=>invoke('open_url_in_chrome_profile',{profile:matchedProfile.profile,email:account.email,target:'flow'}))
+    );
   }else{
-    actions.append(button('去连接 ↗',()=>invoke('open_flow_page')));
+    actions.append(
+      button('同步',async()=>{
+        notice(`正在打开 ${account.email} 对应的真实 Chrome 页面并等待插件回连…`);
+        await invoke('sync_account',{id:account.id});
+        await refresh();
+        notice(`${account.email} 已完成连接并同步积分余额。`);
+      },'primary'),
+      button('打开 Flow ↗',()=>invoke('open_url_in_chrome_profile',{email:account.email,target:'flow'}))
+    );
   }
   actions.append(button('管理',()=>openAccountDialog(account)));
 
@@ -1232,9 +1249,63 @@ const accountsView=createListView({
   defaultOrder:'desc',
   emptyText:'还没有已连接的账号。推荐点击上方「安装 Chrome 插件 ↗」（或安装油猴脚本），再打开 Flow 或 Flow Music 页面登录即可自动直连。',
   noMatchText:'没有匹配当前筛选条件的 Google 账号。',
-  revisionKey:items=>[items,state.connections,state.musicConnections],
+  revisionKey:items=>[items,state.connections,state.musicConnections,state.chromeProfiles],
   renderItem:accountCard,
 });
+
+async function installExtensionForProfile(profile=null,label='Chrome'){
+  const res=await invoke('install_chrome_extension_for_profile',{profile:profile||null});
+  if(res?.dir){
+    try{await navigator.clipboard.writeText(res.dir);}catch{/* clipboard optional in non-secure fixture */}
+  }
+  await refresh();
+  notice(`已在 ${label} 打开 chrome://extensions/ 并高亮选中 chrome-extension 文件夹（路径已复制）：开启右上角「开发者模式」，直接把高亮的 chrome-extension 文件夹拖入扩展页即可立即生效（无需刷新已打开的 Flow 页面）。`);
+}
+
+function renderChromeProfiles(){
+  const box=$('chrome-profiles-box');
+  if(!box)return;
+  const profiles=state.chromeProfiles||[];
+  if(!profiles.length){box.hidden=true;return;}
+  box.hidden=false;
+  const sig=JSON.stringify(profiles);
+  if(box.dataset.signature===sig)return;
+  box.dataset.signature=sig;
+
+  const head=node('div',undefined,'chrome-profiles-head');
+  head.append(
+    node('strong','本机 Chrome 配置与插件状态'),
+    node('small','点击对应配置的「一键安装插件」将同时打开该 Chrome 扩展页并高亮文件夹，直接拖入文件夹即可完成安装')
+  );
+  const list=node('div',undefined,'chrome-profiles-list');
+  for(const p of profiles){
+    const row=node('div',undefined,'chrome-profile-row');
+    const meta=node('div',undefined,'chrome-profile-meta');
+    meta.append(node('strong',p.email?`${p.email}（${p.name} · ${p.profile}）`:`${p.name}（${p.profile}）`));
+    if(p.extension_installed){
+      const ver=p.extension_version?` v${p.extension_version}`:'';
+      meta.append(node('span',`插件已安装${ver}`,'state succeeded'));
+    }else{
+      meta.append(node('span','未安装插件','tag'));
+      if(p.tampermonkey_installed&&!p.tampermonkey_allow_user_scripts){
+        meta.append(node('small','油猴未开脚本权限，推荐装插件'));
+      }
+    }
+    const actions=node('div',undefined,'actions');
+    actions.append(
+      button(
+        p.extension_installed?'定位／重载插件 ↗':'一键安装插件 ↗',
+        ()=>installExtensionForProfile(p.profile,`${p.name} (${p.profile})`),
+        p.extension_installed?'secondary':'primary'
+      ),
+      button('打开 Flow ↗',()=>invoke('open_url_in_chrome_profile',{profile:p.profile,email:p.email||null,target:'flow'})),
+      button('打开 Music ↗',()=>invoke('open_url_in_chrome_profile',{profile:p.profile,email:p.email||null,target:'music'}))
+    );
+    row.append(meta,actions);
+    list.append(row);
+  }
+  box.replaceChildren(head,list);
+}
 
 function renderAccounts(){
   const select=$('account');
@@ -1258,7 +1329,9 @@ function renderAccounts(){
     select.value=state.accounts.some(a=>a.id===previous)?previous:'';
   }
   const anyLive=state.connections.some(c=>c.connected&&c.state==='ready')||state.musicConnections.some(c=>c.connected&&c.state==='ready');
-  if($('accounts-chrome-tip'))$('accounts-chrome-tip').hidden=anyLive;
+  const allInstalled=state.chromeProfiles.length>0&&state.chromeProfiles.every(p=>p.extension_installed);
+  if($('accounts-chrome-tip'))$('accounts-chrome-tip').hidden=anyLive&&allInstalled;
+  renderChromeProfiles();
   if($('sync-all-accounts'))$('sync-all-accounts').hidden=state.accounts.length===0;
   accountsView.update(state.accounts);updateReadiness();
   $('account').closest('label').hidden=state.accounts.length<2;
@@ -1454,16 +1527,18 @@ async function loadMagpie(){
 }
 
 async function refresh(){
-  const [accounts,tasks,media,status,connections,musicConnections]=await Promise.all([
+  const [accounts,tasks,media,status,connections,musicConnections,chromeProfiles]=await Promise.all([
     invoke('accounts'),
     invoke('tasks'),
     invoke('library'),
     invoke('status'),
     invoke('browser_connections'),
     invoke('music_connections').catch(()=>[]),
+    invoke('list_chrome_profiles').catch(()=>[]),
   ]);
   state.connections=connections;
   state.musicConnections=musicConnections;
+  state.chromeProfiles=chromeProfiles;
   state.accounts=accounts;
   state.tasks=tasks;
   state.media=media;
@@ -1485,15 +1560,11 @@ if($('sync-all-accounts'))$('sync-all-accounts').onclick=()=>action($('sync-all-
   let ok=0,failed=[];
   for(let i=0;i<targets.length;i++){
     const a=targets[i];
-    const hasFlow=accountFlowOnline(a);
     const hasMusic=accountMusicOnline(a);
-    if(!hasFlow&&!hasMusic){failed.push(`${a.email}（浏览器未连接）`);continue;}
     notice(`正在同步账号 (${i+1}/${targets.length})：${a.email}…`);
     let syncedAny=false;
-    if(hasFlow){
-      try{await invoke('sync_account',{id:a.id});syncedAny=true;}
-      catch(err){failed.push(`${a.email} Flow（${err?.message||err}）`);}
-    }
+    try{await invoke('sync_account',{id:a.id});syncedAny=true;}
+    catch(err){failed.push(`${a.email} Flow（${err?.message||err}）`);}
     if(hasMusic){
       try{await invoke('sync_music_account',{id:a.id});syncedAny=true;}
       catch(err){failed.push(`${a.email} Music（${err?.message||err}）`);}
@@ -1504,16 +1575,10 @@ if($('sync-all-accounts'))$('sync-all-accounts').onclick=()=>action($('sync-all-
   if(failed.length){
     notice(`同步完成：成功 ${ok} 个，未同步 ${failed.length} 项：${failed.join('；')}`,true);
   }else{
-    notice(`全部 ${ok} 个已连接账号已同步最新状态与积分余额。`);
+    notice(`全部 ${ok} 个已启用账号已同步最新状态与积分余额。`);
   }
 });
-if($('open-chrome-extension'))$('open-chrome-extension').onclick=()=>action($('open-chrome-extension'),async()=>{
-  const dir=await invoke('open_chrome_extension_dir');
-  if(dir){
-    try{await navigator.clipboard.writeText(dir);}catch{/* clipboard unavailable in non-secure fixture */}
-  }
-  notice(`已打开 Chrome 插件目录并复制路径（v${APP_VERSION}）：在浏览器打开 chrome://extensions 开启开发者模式 → 加载已解压的扩展程序，粘贴路径即可（无需油猴）。`);
-});
+if($('open-chrome-extension'))$('open-chrome-extension').onclick=()=>action($('open-chrome-extension'),()=>installExtensionForProfile(null,'Chrome'));
 $('open-userscript').onclick=()=>action($('open-userscript'),async()=>{
   await invoke('open_userscript_url');
   notice(`已在浏览器中打开油猴脚本（v${APP_VERSION}）安装页面。Chrome 138+ 请确认 Tampermonkey 已开启「允许运行用户脚本」（或改用免配置的 Chrome 插件）。`);

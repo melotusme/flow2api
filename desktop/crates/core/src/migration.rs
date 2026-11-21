@@ -443,7 +443,7 @@ pub fn import(store: &Store, path: &Path, import_settings: bool) -> Result<Repor
                     credits: row["credits"].as_i64(),
                     browser_data_dir: String::new(),
                     browser_profile: String::new(),
-                    browser_bridge: false,
+                    browser_bridge: true,
                     ..Account::default()
                 };
                 tx.execute(
@@ -812,7 +812,7 @@ mod tests {
             credits: Some(800),
             browser_data_dir: String::new(),
             browser_profile: String::new(),
-            browser_bridge: false,
+            browser_bridge: true,
             ..Account::default()
         };
         store.save_account(&account)?;

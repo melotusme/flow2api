@@ -73,7 +73,7 @@ pub struct Account {
     pub browser_data_dir: String,
     #[serde(default)]
     pub browser_profile: String,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub browser_bridge: bool,
     #[serde(default)]
     pub priority: i32,
@@ -112,7 +112,7 @@ impl Default for Account {
             credits: None,
             browser_data_dir: String::new(),
             browser_profile: String::new(),
-            browser_bridge: false,
+            browser_bridge: true,
             priority: 0,
             disabled_until: None,
             disabled_reason: None,

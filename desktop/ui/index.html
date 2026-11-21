@@ -27,7 +27,7 @@
       <div class="aside-bottom">
         <div id="service-pill"><i aria-hidden="true"></i><span>正在连接</span></div>
         <div class="aside-update">
-          <span class="version-badge" id="aside-version">v0.4.0</span>
+          <span class="version-badge" id="aside-version">v0.4.1</span>
           <button id="sidebar-check-update" class="text-button" type="button">检查更新 ↗</button>
         </div>
         <small class="aside-tip">关闭窗口后留在菜单栏，API 继续运行。</small>
@@ -139,7 +139,7 @@
           <div class="section-heading accounts-heading">
             <div>
               <h2>Google 账号</h2>
-              <p>在默认浏览器打开 Flow 或 Flow Music 并登录，通过 Chrome 插件或油猴脚本（v0.4.0）自动免码直连；保持标签页打开即可创作。</p>
+              <p>使用本机真实 Chrome 对应账号配置直连 Flow 与 Flow Music（绝不启动无登录态的独立受控浏览器）；保持标签页打开即可创作。</p>
             </div>
             <div class="actions">
               <button id="open-flow" class="primary" type="button">打开 Flow ↗</button>
@@ -149,9 +149,10 @@
               <button id="open-userscript" class="secondary" type="button">安装油猴脚本 ↗</button>
             </div>
           </div>
-          <div id="accounts-chrome-tip" class="info-banner" hidden>
-            <span>推荐点击「安装 Chrome 插件 ↗」加载免配置直连扩展（无需 Tampermonkey）；或点击「安装油猴脚本 ↗」使用 v0.4.0 脚本（Chrome 138+ 需在 Tampermonkey 扩展详情页开启「允许运行用户脚本」），安装后刷新 Flow / Flow Music 页面即可自动直连。</span>
+          <div id="accounts-chrome-tip" class="info-banner">
+            <span>推荐使用 Chrome 插件（v0.4.1）：拖入加载后全部站点与本机通信权限自动生效，已打开的 Flow 标签页免刷新即刻直连；若使用油猴脚本，Chrome 138+ 需在 Tampermonkey 详情页手动开启「允许运行用户脚本」并确认跨域授权。</span>
           </div>
+          <div id="chrome-profiles-box" class="chrome-profiles-box" hidden></div>
           <div id="account-list"></div>
         </div>
       </section>
@@ -229,7 +230,7 @@
           </section>
           <section id="settings-updates" class="settings-section" aria-labelledby="settings-updates-title">
             <div class="section-heading">
-              <div><h2 id="settings-updates-title" tabindex="-1">软件版本与更新</h2><p>当前运行版本：<b id="settings-current-version">v0.4.0</b></p></div>
+              <div><h2 id="settings-updates-title" tabindex="-1">软件版本与更新</h2><p>当前运行版本：<b id="settings-current-version">v0.4.1</b></p></div>
               <span class="tag" id="update-badge">检查更新</span>
             </div>
             <p id="update-status" class="hint" role="status" aria-live="polite">从公开的 GitHub Release 检查更新，无需登录。</p>
@@ -245,7 +246,7 @@
         </div>
       </section>
       <footer>
-        <span id="footer-version">Flow2API Desktop v0.4.0 · Rust + Tauri</span>
+        <span id="footer-version">Flow2API Desktop v0.4.1 · Rust + Tauri</span>
         <span id="browser-status">浏览器未连接</span>
       </footer>
     </main>

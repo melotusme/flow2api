@@ -117,7 +117,7 @@ impl Store {
         // Retry briefly so an updating process releasing its lock during restart never races startup.
         let instance = acquire_instance_lock(root, 25)?;
         std::fs::create_dir_all(root.join("generated"))?;
-        std::fs::create_dir_all(root.join("profiles"))?;
+        let _ = std::fs::remove_dir_all(root.join("profiles"));
         let mut connection = Connection::open(root.join("desktop.db"))?;
         let schema: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if schema > SCHEMA_VERSION {
@@ -173,11 +173,13 @@ impl Store {
             task.updated_at = now();
             store.save_task(&task)?;
         }
-        // Clean up legacy User Data paths left on browser-bridge accounts so saving/syncing never hits profile lock checks.
+        // Migrate all accounts to browser-bridge mode and strip legacy User Data paths so isolated unlogged Chrome is never spawned.
         for mut account in store.accounts()? {
-            if account.browser_bridge
-                && (!account.browser_data_dir.is_empty() || !account.browser_profile.is_empty())
+            if !account.browser_bridge
+                || !account.browser_data_dir.is_empty()
+                || !account.browser_profile.is_empty()
             {
+                account.browser_bridge = true;
                 account.browser_data_dir.clear();
                 account.browser_profile.clear();
                 store.connection.lock().unwrap().execute(
@@ -340,6 +342,9 @@ impl Store {
                 account.image_enabled = synced.image_enabled;
                 account.video_enabled = synced.video_enabled;
                 account.music_enabled = synced.music_enabled;
+                account.browser_bridge = true;
+                account.browser_data_dir.clear();
+                account.browser_profile.clear();
                 connection.execute(
                     "INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
                     params![account.id, serde_json::to_string(&account)?],
@@ -396,42 +401,9 @@ impl Store {
             bail!("请输入 Google 账号邮箱");
         }
         let mut stored = account.clone();
-        if stored.browser_bridge {
-            stored.browser_data_dir.clear();
-            stored.browser_profile.clear();
-        } else {
-            if stored.browser_data_dir.is_empty() && !stored.browser_profile.is_empty() {
-                bail!("独立登录模式不能指定已有资料子目录");
-            }
-            if !stored.browser_data_dir.is_empty() {
-                let root = Path::new(&stored.browser_data_dir)
-                    .canonicalize()
-                    .unwrap_or_else(|_| PathBuf::from(&stored.browser_data_dir));
-                let profile = if stored.browser_profile.trim().is_empty() {
-                    "Default"
-                } else {
-                    stored.browser_profile.trim()
-                };
-                for other in self.accounts()? {
-                    if other.id != stored.id
-                        && !other.browser_bridge
-                        && !other.browser_data_dir.is_empty()
-                    {
-                        let other_root = Path::new(&other.browser_data_dir)
-                            .canonicalize()
-                            .unwrap_or_else(|_| PathBuf::from(&other.browser_data_dir));
-                        let other_profile = if other.browser_profile.trim().is_empty() {
-                            "Default"
-                        } else {
-                            other.browser_profile.trim()
-                        };
-                        if other_root == root && other_profile == profile {
-                            bail!("该浏览器资料子目录（{profile}）已绑定另一个账号");
-                        }
-                    }
-                }
-            }
-        }
+        stored.browser_bridge = true;
+        stored.browser_data_dir.clear();
+        stored.browser_profile.clear();
         self.connection.lock().unwrap().execute("INSERT INTO accounts(id,value) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET value=excluded.value", params![stored.id, serde_json::to_string(&stored)?])?;
         Ok(())
     }
@@ -525,67 +497,57 @@ mod tests {
         let old = serde_json::json!({"id":"one","email":"one@example.test","enabled":true,
             "project_id":"","last_synced":null,"credits":null});
         let mut account: Account = serde_json::from_value(old)?;
+        assert!(account.browser_bridge);
         assert!(account.browser_data_dir.is_empty());
         assert!(account.browser_profile.is_empty());
         let directory = tempfile::tempdir()?;
         let store_dir = directory.path().join("store");
+        std::fs::create_dir_all(store_dir.join("profiles/stale-profile"))?;
         let store = Store::open(&store_dir)?;
+        assert!(!store_dir.join("profiles").exists());
+
         let user_data = directory.path().to_string_lossy().into_owned();
+        account.browser_bridge = false;
         account.browser_data_dir = user_data.clone();
         account.browser_profile = "Default".into();
         store.save_account(&account)?;
+        let saved_first = store.account("one")?;
+        assert!(saved_first.browser_bridge);
+        assert!(saved_first.browser_data_dir.is_empty());
+        assert!(saved_first.browser_profile.is_empty());
 
-        // Different Chrome profile under the SAME User Data root is allowed.
-        let mut second = Account {
+        let second = Account {
             id: "two".into(),
             email: "two@example.test".into(),
             enabled: true,
+            browser_bridge: false,
             browser_data_dir: user_data.clone(),
             browser_profile: "Profile 6".into(),
             ..Account::default()
         };
         store.save_account(&second)?;
+        assert!(store.account("two")?.browser_bridge);
 
-        // Exact same (root, profile) collision on non-bridge accounts is rejected (empty defaults to "Default").
-        second.browser_profile.clear();
-        let err = store.save_account(&second).unwrap_err().to_string();
-        assert!(err.contains("另一个账号"), "unexpected error: {err}");
-        assert!(!err.contains("同一根目录不能并发管理多个账号"));
-
-        // Browser-bridge accounts ignore and clear legacy browser_data_dir / browser_profile.
-        let bridge_acct = Account {
-            id: "bridge-one".into(),
-            email: "bridge@example.test".into(),
-            enabled: true,
-            browser_bridge: true,
-            browser_data_dir: user_data.clone(),
-            browser_profile: "Default".into(),
-            ..Account::default()
-        };
-        store.save_account(&bridge_acct)?;
-        let saved_bridge = store.account("bridge-one")?;
-        assert!(saved_bridge.browser_data_dir.is_empty());
-        assert!(saved_bridge.browser_profile.is_empty());
-
-        // Legacy DB rows with browser_bridge=true and stale browser_data_dir are cleaned on Store::open.
+        // Legacy DB rows with browser_bridge=false and stale browser_data_dir are migrated on Store::open.
         let stale_raw = serde_json::json!({
-            "id": "bridge-stale",
+            "id": "legacy-non-bridge",
             "email": "stale@example.test",
             "enabled": true,
             "project_id": "",
             "last_synced": null,
             "credits": null,
-            "browser_bridge": true,
+            "browser_bridge": false,
             "browser_data_dir": user_data,
-            "browser_profile": "Profile 1"
+            "browser_profile": "Profile 6"
         });
         store.connection.lock().unwrap().execute(
             "INSERT INTO accounts(id,value) VALUES(?1,?2)",
-            params!["bridge-stale", stale_raw.to_string()],
+            params!["legacy-non-bridge", stale_raw.to_string()],
         )?;
         drop(store);
         let reopened = Store::open(&store_dir)?;
-        let cleaned = reopened.account("bridge-stale")?;
+        let cleaned = reopened.account("legacy-non-bridge")?;
+        assert!(cleaned.browser_bridge);
         assert!(cleaned.browser_data_dir.is_empty());
         assert!(cleaned.browser_profile.is_empty());
         Ok(())

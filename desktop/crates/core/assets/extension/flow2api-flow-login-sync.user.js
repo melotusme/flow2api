@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flow2API 登录态同步
 // @namespace    flow2api
-// @version      0.4.0
+// @version      0.4.1
 // @description  将当前 Flow 与 Flow Music 标签页免连接码直连到本机桌面应用，Cookie 与令牌始终留在浏览器
 // @match        https://flow.google.com/*
 // @match        https://www.flowmusic.app/*
@@ -24,7 +24,7 @@
   const isMusic = host === "www.flowmusic.app" || host === "flowmusic.app";
   if (!isFlow && !isMusic) return;
 
-  const VERSION = "0.4.0";
+  const VERSION = "0.4.1";
   const isExtensionActive = () =>
     document.documentElement?.dataset?.flow2apiBridgeActive === "1";
   if (isExtensionActive()) return;
@@ -149,38 +149,67 @@
     }
   }
 
+  function decodeBase64Utf8(b64) {
+    const normalized = b64.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = normalized.length % 4;
+    const padded = pad ? normalized + "=".repeat(4 - pad) : normalized;
+    const bin = atob(padded);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) {
+      bytes[i] = bin.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+  }
+
   function readMusicAuth() {
     const ck = {};
     for (const entry of document.cookie.split("; ")) {
       const idx = entry.indexOf("=");
       if (idx > 0) {
-        ck[entry.slice(0, idx)] = decodeURIComponent(entry.slice(idx + 1));
+        try {
+          ck[entry.slice(0, idx)] = decodeURIComponent(entry.slice(idx + 1));
+        } catch {
+          ck[entry.slice(0, idx)] = entry.slice(idx + 1);
+        }
       }
     }
-    let raw = "";
-    if (ck["sb-sb-auth-token"]) {
-      raw = ck["sb-sb-auth-token"];
-    } else {
-      for (let i = 0; i < 6; i++) {
-        const part = ck["sb-sb-auth-token." + i];
-        if (!part) break;
-        raw += part;
+    const baseCandidates = [];
+    if (ck["sb-sb-auth-token"] || ck["sb-sb-auth-token.0"]) {
+      baseCandidates.push("sb-sb-auth-token");
+    }
+    for (const key of Object.keys(ck)) {
+      const m = key.match(/^(sb-[A-Za-z0-9_-]+-auth-token)(?:\.0)?$/);
+      if (m && !baseCandidates.includes(m[1])) {
+        baseCandidates.push(m[1]);
       }
     }
-    if (!raw) return null;
-    try {
-      if (raw.startsWith("base64-")) {
-        raw = atob(raw.slice(7).replace(/-/g, "+").replace(/_/g, "/"));
+    for (const base of baseCandidates) {
+      let raw = "";
+      if (ck[base]) {
+        raw = ck[base];
+      } else {
+        for (let i = 0; i < 20; i++) {
+          const part = ck[base + "." + i];
+          if (!part) break;
+          raw += part;
+        }
       }
-      const parsed = JSON.parse(raw);
-      return {
-        token: parsed.access_token || null,
-        expiresAt: parsed.expires_at || 0,
-        email: parsed.user?.email ? String(parsed.user.email).trim().toLowerCase() : null,
-      };
-    } catch {
-      return null;
+      if (!raw) continue;
+      try {
+        const jsonText = raw.startsWith("base64-")
+          ? decodeBase64Utf8(raw.slice(7))
+          : raw;
+        const parsed = JSON.parse(jsonText);
+        if (parsed && (parsed.access_token || parsed.user?.email)) {
+          return {
+            token: parsed.access_token || null,
+            expiresAt: parsed.expires_at || 0,
+            email: parsed.user?.email ? String(parsed.user.email).trim().toLowerCase() : null,
+          };
+        }
+      } catch {}
     }
+    return null;
   }
 
   function email() {
@@ -542,7 +571,12 @@
     } finally {
       busy = false;
       if (!stopped && connection) {
-        timer = setTimeout(poll, 500);
+        clearTimeout(timer);
+        if (connection.result) {
+          queueMicrotask(poll);
+        } else {
+          timer = setTimeout(poll, 500);
+        }
       }
     }
   }

@@ -5,8 +5,15 @@
   const isFlow = host === "flow.google.com";
   const isMusic = host === "www.flowmusic.app" || host === "flowmusic.app";
   if (!isFlow && !isMusic) return;
-  if (window.__flow2apiExtContentActive) return;
-  window.__flow2apiExtContentActive = true;
+
+  if (typeof window.__flow2apiExtIsAlive === "function" && window.__flow2apiExtIsAlive()) {
+    return;
+  }
+  if (typeof window.__flow2apiExtCleanup === "function") {
+    try {
+      window.__flow2apiExtCleanup();
+    } catch {}
+  }
 
   function claimBridgeOwnership() {
     if (document.documentElement) {
@@ -16,7 +23,7 @@
   claimBridgeOwnership();
 
   const VERSION =
-    (typeof chrome !== "undefined" && chrome.runtime?.getManifest?.()?.version) || "0.4.0";
+    (typeof chrome !== "undefined" && chrome.runtime?.getManifest?.()?.version) || "0.4.1";
   const SERVICE = isMusic ? "music" : "flow";
   const PAIR_PATH = isMusic ? "/api/music-bridge/pair" : "/api/browser-bridge/pair";
   const POLL_PATH = isMusic ? "/api/music-bridge/poll" : "/api/browser-bridge/poll";
@@ -90,12 +97,14 @@
   }
 
   async function callPageHook(operation, expectedEmail, input, timeoutMs = 105000) {
-    const port = hookPort || (await Promise.race([
-      hookReadyPromise,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("页面桥接初始化超时，请刷新当前标签页")), 5000)
-      ),
-    ]));
+    const port =
+      hookPort ||
+      (await Promise.race([
+        hookReadyPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("页面桥接初始化超时，请刷新当前标签页")), 5000)
+        ),
+      ]));
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -121,6 +130,9 @@
   let timer = null;
   let heartbeatInterval = null;
   let healInterval = null;
+  let tickPort = null;
+  let tickReconnectTimer = null;
+  let lastPollAt = 0;
   let statusEl = null;
   let dotEl = null;
   let titleEl = null;
@@ -133,12 +145,34 @@
     return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
   }
 
-  function handleInvalidatedExtension() {
+  function stopTimers() {
     stopped = true;
     clearTimeout(timer);
+    clearTimeout(tickReconnectTimer);
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     if (healInterval) clearInterval(healInterval);
-    setStatus("扩展已更新或重载，请刷新此页面以恢复直连", "warn");
+    if (tickPort) {
+      try {
+        tickPort.disconnect();
+      } catch {}
+      tickPort = null;
+    }
+    if (hookPort) {
+      try {
+        hookPort.close();
+      } catch {}
+    }
+  }
+
+  window.__flow2apiExtIsAlive = () => !stopped && extensionAlive();
+  window.__flow2apiExtCleanup = () => {
+    stopTimers();
+    document.getElementById("flow2api-connection")?.remove();
+  };
+
+  function handleInvalidatedExtension() {
+    stopTimers();
+    setStatus("扩展已更新或重载，自动重连将接管或请刷新此页", "warn");
   }
 
   const storageReady = (async () => {
@@ -151,7 +185,6 @@
       if (stored[CONN_STORAGE_KEY] && typeof stored[CONN_STORAGE_KEY] === "object") {
         connection = { ...stored[CONN_STORAGE_KEY], resume: true };
       }
-      // Opportunistically prune stale closed-tab entries older than 7 days.
       const staleCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
       const staleKeys = [];
       for (const [k, v] of Object.entries(stored)) {
@@ -224,20 +257,33 @@
     }
   }
 
+  async function readMusicCookieFallback() {
+    if (!isMusic || !extensionAlive()) return null;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "flow2api_music_auth" });
+      if (res && res.ok && res.auth) return res.auth;
+    } catch {
+      if (!extensionAlive()) handleInvalidatedExtension();
+    }
+    return null;
+  }
+
   function fallbackDomEmail() {
     if (isMusic) {
       const ck = {};
       for (const entry of document.cookie.split("; ")) {
         const idx = entry.indexOf("=");
         if (idx > 0) {
-          ck[entry.slice(0, idx)] = decodeURIComponent(entry.slice(idx + 1));
+          try {
+            ck[entry.slice(0, idx)] = decodeURIComponent(entry.slice(idx + 1));
+          } catch {
+            ck[entry.slice(0, idx)] = entry.slice(idx + 1);
+          }
         }
       }
-      let raw = "";
-      if (ck["sb-sb-auth-token"]) {
-        raw = ck["sb-sb-auth-token"];
-      } else {
-        for (let i = 0; i < 6; i++) {
+      let raw = ck["sb-sb-auth-token"] || "";
+      if (!raw) {
+        for (let i = 0; i < 20; i++) {
           const part = ck["sb-sb-auth-token." + i];
           if (!part) break;
           raw += part;
@@ -270,7 +316,13 @@
       const probed = await callPageHook("probe_email", null, null, 3000);
       if (probed?.email) return probed.email;
     } catch {}
-    return fallbackDomEmail();
+    const domEmail = fallbackDomEmail();
+    if (domEmail) return domEmail;
+    if (isMusic) {
+      const cookieAuth = await readMusicCookieFallback();
+      if (cookieAuth?.email) return cookieAuth.email;
+    }
+    return null;
   }
 
   function localServer(value) {
@@ -324,7 +376,14 @@
   }
 
   async function execute(command) {
-    const value = await callPageHook(command.operation, connection.email, command.input || {});
+    let input = command.input || {};
+    if (isMusic) {
+      const fallbackAuth = await readMusicCookieFallback();
+      if (fallbackAuth) {
+        input = { ...input, __fallbackAuth: fallbackAuth };
+      }
+    }
+    const value = await callPageHook(command.operation, connection.email, input);
     if (value && typeof value === "object" && value.__willNavigateTo) {
       connection.result = { id: command.id, value: { navigated: true } };
       await save();
@@ -375,6 +434,7 @@
     await storageReady;
     if (!connection || stopped || busy) return;
     busy = true;
+    lastPollAt = Date.now();
     try {
       const response = await request(
         connection.server,
@@ -412,10 +472,45 @@
     } finally {
       busy = false;
       if (!stopped && connection) {
-        timer = setTimeout(poll, 500);
+        clearTimeout(timer);
+        if (connection.result) {
+          queueMicrotask(poll);
+        } else {
+          timer = setTimeout(poll, 500);
+        }
       }
     }
   }
+
+  function connectTickPort() {
+    if (stopped || !extensionAlive() || tickPort || !chrome.runtime?.connect) return;
+    try {
+      const port = chrome.runtime.connect({ name: "flow2api-tick" });
+      tickPort = port;
+      port.onMessage.addListener((msg) => {
+        if (stopped || !msg || msg.type !== "tick") return;
+        if (connection && !busy && !pairing && Date.now() - lastPollAt >= 1200) {
+          clearTimeout(timer);
+          poll();
+        } else if (!connection && !busy && !pairing && Date.now() - lastPollAt >= 4500) {
+          lastPollAt = Date.now();
+          detectEmail().then((em) => {
+            if (em && !connection && !stopped && !busy && !pairing) pairNow(true);
+          });
+        }
+      });
+      port.onDisconnect.addListener(() => {
+        tickPort = null;
+        if (!stopped && extensionAlive()) {
+          clearTimeout(tickReconnectTimer);
+          tickReconnectTimer = setTimeout(connectTickPort, 1000);
+        }
+      });
+    } catch {
+      tickPort = null;
+    }
+  }
+  connectTickPort();
 
   let heartbeatBusy = false;
   heartbeatInterval = setInterval(async () => {

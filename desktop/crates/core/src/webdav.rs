@@ -690,8 +690,10 @@ mod tests {
         assert_eq!(local.email, "moved@example.test");
         assert!(local.last_synced.is_none());
         assert!(local.credits.is_none());
-        assert!(local.browser_data_dir.contains("profile"));
+        assert!(local.browser_bridge);
+        assert!(local.browser_data_dir.is_empty());
         let cloud = store.account("cloud").unwrap();
+        assert!(cloud.browser_bridge);
         assert!(cloud.browser_data_dir.is_empty());
         assert!(store
             .merge_synced(0, 90, 120, &[])

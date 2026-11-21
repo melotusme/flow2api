@@ -51,6 +51,12 @@ window.__TAURI__={event:{listen:async(name,callback)=>{listeners[name]=callback}
     case 'sync_music_account':{const target=accounts.find(a=>a.id===args.id)||account;target.music_last_synced=new Date().toISOString();return {...target};}
     case 'update_status':return {phase:'idle',message:''};
     case 'check_update':case 'check_private_update':return null;
+    case 'list_chrome_profiles':return [
+      {data_dir:'fixture/User Data',profile:'Profile 6',name:'Ultra Studio',email:'creator@example.test',gaia_name:'Creator',is_last_used:true,developer_mode:true,extension_installed:true,extension_version:'0.4.1',tampermonkey_installed:true,tampermonkey_allow_user_scripts:false},
+      {data_dir:'fixture/User Data',profile:'Default',name:'Personal',email:'backup@example.test',gaia_name:'Backup',is_last_used:false,developer_mode:false,extension_installed:false,extension_version:null,tampermonkey_installed:true,tampermonkey_allow_user_scripts:false},
+    ];
+    case 'install_chrome_extension_for_profile':return {dir:'fixture/chrome-extension',profile:args.profile||null,opened_browser:true,opened_folder:true};
+    case 'open_url_in_chrome_profile':return args.profile||'Default';
     case 'open_chrome_extension_dir':return 'fixture/chrome-extension';
     case 'open_flow_page':case 'open_flow_music_page':case 'open_userscript_url':case 'open_data':case 'open_media':return;
     default:throw Error('夹具未实现命令：'+name);

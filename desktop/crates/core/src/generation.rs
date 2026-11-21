@@ -89,31 +89,10 @@ impl App {
         }
         Ok(())
     }
-    pub async fn open_login(&self, id: &str) -> Result<()> {
+    pub async fn open_login(&self, _id: &str) -> Result<()> {
         let _admission = self.job_gate.lock().await;
         self.ensure_available()?;
-        if self.status().busy() {
-            bail!("请等待生成任务完成后打开登录窗口");
-        }
-        let account = self.store.account(id)?;
-        let settings = self.store.settings()?;
-        let session = self
-            .browsers
-            .session(
-                id,
-                &settings.browser_executable,
-                &settings.proxy_url,
-                &account.browser_data_dir,
-                &account.browser_profile,
-            )
-            .await?;
-        session
-            .lock()
-            .await
-            .call("Page.bringToFront", json!({}))
-            .await?;
-        self.change_status(|s| s.browser = "Chrome 已打开，等待登录／同步".into());
-        Ok(())
+        bail!("独立调试浏览器已停用；请在真实 Chrome 中安装 Flow2API 插件并打开 Flow 页面自动直连")
     }
     pub async fn sync_account(&self, id: &str) -> Result<Account> {
         let _admission = self.job_gate.lock().await;
@@ -296,7 +275,7 @@ impl App {
                 a.available()
                     && a.supports_media_type(media_type)
                     && a.last_synced.is_some()
-                    && (!a.browser_bridge || self.bridge.ready(&a.id))
+                    && self.bridge.ready(&a.id)
             }
         };
         let account = match request.account_id.as_deref() {
@@ -458,7 +437,7 @@ impl App {
                     && if media_type == "audio" {
                         a.music_last_synced.is_some() && self.music_bridge.ready(&a.id)
                     } else {
-                        a.last_synced.is_some() && (!a.browser_bridge || self.bridge.ready(&a.id))
+                        a.last_synced.is_some() && self.bridge.ready(&a.id)
                     }
             })
             .min_by_key(|a| account_load(a, &tasks)))
@@ -1536,6 +1515,9 @@ mod tests {
         app.store.save_account(&a1)?;
         app.store.save_account(&a2)?;
         app.store.save_account(&a3)?;
+        for id in ["a1", "a2", "a3"] {
+            app.bridge.connect(id).set_state("ready", "ok");
+        }
 
         let mut excluded = HashSet::new();
         assert_eq!(

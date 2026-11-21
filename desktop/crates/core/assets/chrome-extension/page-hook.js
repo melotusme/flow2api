@@ -11,13 +11,22 @@
   }
 
   const page = window;
-  if (page.__flow2apiExtPageHookInstalled) return;
-  try {
-    page.Object.defineProperty(page, "__flow2apiExtPageHookInstalled", {
-      value: true,
-    });
-  } catch {
-    return;
+
+  // Tear down any unconsumed handshake listeners from a previous extension reload on the same tab.
+  if (typeof page.__flow2apiExtHookCleanup === "function") {
+    try {
+      page.__flow2apiExtHookCleanup();
+    } catch {}
+  }
+
+  // Mark hook installed (configurable so reloads never throw if inspected).
+  if (!page.__flow2apiExtPageHookInstalled) {
+    try {
+      page.Object.defineProperty(page, "__flow2apiExtPageHookInstalled", {
+        value: true,
+        configurable: true,
+      });
+    } catch {}
   }
 
   const nativeFetch = page.fetch.bind(page);
@@ -33,7 +42,7 @@
     return ctrl.signal;
   }
 
-  // Install reCAPTCHA Enterprise hook and action guard on Google Flow before page scripts run.
+  // Install reCAPTCHA Enterprise hook and action guard on Google Flow (idempotent across reloads).
   if (isFlow) {
     try {
       if (!page.__flow2apiTrustedRecaptchaHookInstalled) {
@@ -88,38 +97,67 @@
 
   const delay = (ms) => new Promise((resolve) => nativeSetTimeout(resolve, ms));
 
+  function decodeBase64Utf8(b64) {
+    const normalized = b64.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = normalized.length % 4;
+    const padded = pad ? normalized + "=".repeat(4 - pad) : normalized;
+    const bin = atob(padded);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) {
+      bytes[i] = bin.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+  }
+
   function readMusicAuth() {
     const ck = {};
     for (const entry of document.cookie.split("; ")) {
       const idx = entry.indexOf("=");
       if (idx > 0) {
-        ck[entry.slice(0, idx)] = decodeURIComponent(entry.slice(idx + 1));
+        try {
+          ck[entry.slice(0, idx)] = decodeURIComponent(entry.slice(idx + 1));
+        } catch {
+          ck[entry.slice(0, idx)] = entry.slice(idx + 1);
+        }
       }
     }
-    let raw = "";
-    if (ck["sb-sb-auth-token"]) {
-      raw = ck["sb-sb-auth-token"];
-    } else {
-      for (let i = 0; i < 6; i++) {
-        const part = ck["sb-sb-auth-token." + i];
-        if (!part) break;
-        raw += part;
+    const baseCandidates = [];
+    if (ck["sb-sb-auth-token"] || ck["sb-sb-auth-token.0"]) {
+      baseCandidates.push("sb-sb-auth-token");
+    }
+    for (const key of Object.keys(ck)) {
+      const m = key.match(/^(sb-[A-Za-z0-9_-]+-auth-token)(?:\.0)?$/);
+      if (m && !baseCandidates.includes(m[1])) {
+        baseCandidates.push(m[1]);
       }
     }
-    if (!raw) return null;
-    try {
-      if (raw.startsWith("base64-")) {
-        raw = atob(raw.slice(7).replace(/-/g, "+").replace(/_/g, "/"));
+    for (const base of baseCandidates) {
+      let raw = "";
+      if (ck[base]) {
+        raw = ck[base];
+      } else {
+        for (let i = 0; i < 20; i++) {
+          const part = ck[base + "." + i];
+          if (!part) break;
+          raw += part;
+        }
       }
-      const parsed = JSON.parse(raw);
-      return {
-        token: parsed.access_token || null,
-        expiresAt: parsed.expires_at || 0,
-        email: parsed.user?.email ? String(parsed.user.email).trim().toLowerCase() : null,
-      };
-    } catch {
-      return null;
+      if (!raw) continue;
+      try {
+        const jsonText = raw.startsWith("base64-")
+          ? decodeBase64Utf8(raw.slice(7))
+          : raw;
+        const parsed = JSON.parse(jsonText);
+        if (parsed && (parsed.access_token || parsed.user?.email)) {
+          return {
+            token: parsed.access_token || null,
+            expiresAt: parsed.expires_at || 0,
+            email: parsed.user?.email ? String(parsed.user.email).trim().toLowerCase() : null,
+          };
+        }
+      } catch {}
     }
+    return null;
   }
 
   function detectEmail() {
@@ -156,14 +194,25 @@
     /^\/(billing\/(credits|subscription)|conversation(\/create)?|conversations\/[a-f0-9-]{36}(\/running-job)?|audio-create-song-status\/[A-Za-z0-9_-]+)$/;
 
   async function executeMusic(operation, expectedEmail, input) {
-    const auth = readMusicAuth();
+    const payload = input || {};
+    const fallbackAuth =
+      payload.__fallbackAuth && typeof payload.__fallbackAuth === "object"
+        ? payload.__fallbackAuth
+        : null;
+    const domAuth = readMusicAuth();
+    const auth =
+      domAuth?.email && domAuth?.token
+        ? domAuth
+        : fallbackAuth?.email && fallbackAuth?.token
+          ? fallbackAuth
+          : domAuth || fallbackAuth;
+
     if (!auth?.email || !auth.token) {
       throw new Error("Flow Music 尚未登录，请刷新页面并登录 Google 账号");
     }
     if (auth.email !== expectedEmail) {
       throw new Error("Flow Music 登录账号已切换，请重新连接");
     }
-    const payload = input || {};
     if (operation === "identity") {
       return { email: auth.email };
     }
@@ -373,7 +422,7 @@
     }
   }
 
-  // Negotiate a locked, private MessagePort with content.js at document_start.
+  // Negotiate a locked, private MessagePort with content.js (works both at document_start and on retroactive injection).
   // Localhost bridge tokens never enter MAIN world; untrusted page scripts cannot read or forge messages.
   let channelSecret = null;
   let port = null;
@@ -425,6 +474,16 @@
     };
     port.postMessage({ type: "ready", secret: channelSecret });
   }
+
+  try {
+    page.Object.defineProperty(page, "__flow2apiExtHookCleanup", {
+      value: () => {
+        window.removeEventListener("__flow2api_ext_seed__", onSeed, true);
+        window.removeEventListener("message", onPortTransfer, true);
+      },
+      configurable: true,
+    });
+  } catch {}
 
   window.addEventListener("__flow2api_ext_seed__", onSeed, true);
   window.addEventListener("message", onPortTransfer, true);

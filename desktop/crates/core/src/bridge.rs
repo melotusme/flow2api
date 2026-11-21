@@ -12,7 +12,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-const ONLINE: Duration = Duration::from_secs(15);
+const ONLINE: Duration = Duration::from_secs(90);
 #[derive(Serialize)]
 pub struct ConnectionStatus {
     pub account_id: String,
@@ -356,24 +356,12 @@ impl App {
         &self,
         account: &Account,
     ) -> Result<Arc<tokio::sync::Mutex<Session>>> {
-        if account.browser_bridge {
-            let peer = self
-                .bridge
-                .get(&account.id)
-                .filter(|p| p.online())
-                .context("Flow 标签页未连接；请在默认浏览器打开 Flow，连接后再同步")?;
-            return Ok(self.browsers.bridge_session(&account.id, peer).await);
-        }
-        let settings = self.store.settings()?;
-        self.browsers
-            .session(
-                &account.id,
-                &settings.browser_executable,
-                &settings.proxy_url,
-                &account.browser_data_dir,
-                &account.browser_profile,
-            )
-            .await
+        let peer = self
+            .bridge
+            .get(&account.id)
+            .filter(|p| p.online())
+            .context("Flow 标签页未连接；请在真实浏览器打开 Flow 页面并加载 Chrome 插件自动直连")?;
+        Ok(self.browsers.bridge_session(&account.id, peer).await)
     }
     pub async fn pair_browser(
         self: &Arc<Self>,

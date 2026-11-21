@@ -183,8 +183,22 @@ pub struct BrowserProfile {
     pub email: String,
 }
 
-/// Only read Chrome's profile index and check directory structure; never read cookies.
-pub fn discover_profiles() -> Vec<BrowserProfile> {
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ChromeProfileInfo {
+    pub data_dir: String,
+    pub profile: String,
+    pub name: String,
+    pub email: String,
+    pub gaia_name: String,
+    pub is_last_used: bool,
+    pub developer_mode: bool,
+    pub extension_installed: bool,
+    pub extension_version: Option<String>,
+    pub tampermonkey_installed: bool,
+    pub tampermonkey_allow_user_scripts: bool,
+}
+
+fn chrome_user_data_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     #[cfg(target_os = "macos")]
     if let Some(home) = std::env::var_os("HOME") {
@@ -203,9 +217,217 @@ pub fn discover_profiles() -> Vec<BrowserProfile> {
         roots.push(config.join("chromium"));
     }
     roots
+}
+
+fn normalize_ext_path(raw: &str) -> String {
+    let trimmed = raw
+        .trim()
+        .trim_start_matches(r"\\?\")
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string();
+    if cfg!(windows) {
+        trimmed.to_ascii_lowercase()
+    } else {
+        trimmed
+    }
+}
+
+/// Only read Chrome's profile index and check directory structure; never read cookies.
+pub fn discover_profiles() -> Vec<BrowserProfile> {
+    chrome_user_data_roots()
         .into_iter()
         .flat_map(|root| profiles_in(&root))
         .collect()
+}
+
+/// Read-only inspection of local Chrome profiles and extension installation state (never reads cookies).
+pub fn inspect_chrome_profiles(extension_dir: &Path) -> Vec<ChromeProfileInfo> {
+    chrome_user_data_roots()
+        .into_iter()
+        .flat_map(|root| inspect_chrome_profiles_in(&root, extension_dir))
+        .collect()
+}
+
+pub fn find_chrome_profile_for_email(
+    extension_dir: &Path,
+    email: &str,
+) -> Option<ChromeProfileInfo> {
+    let target = email.trim();
+    if target.is_empty() {
+        return None;
+    }
+    inspect_chrome_profiles(extension_dir)
+        .into_iter()
+        .find(|p| p.email.eq_ignore_ascii_case(target))
+}
+
+pub fn inspect_chrome_profiles_in(root: &Path, extension_dir: &Path) -> Vec<ChromeProfileInfo> {
+    let index = std::fs::read(root.join("Local State"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let Some(cache) = index
+        .as_ref()
+        .and_then(|v| v["profile"]["info_cache"].as_object())
+    else {
+        return Vec::new();
+    };
+    let last_used = index
+        .as_ref()
+        .and_then(|v| v["profile"]["last_used"].as_str())
+        .unwrap_or_default();
+    let expected_ext = normalize_ext_path(&extension_dir.to_string_lossy());
+    let mut profiles = Vec::new();
+    for (profile, info) in cache {
+        let Ok(canonical_root) = validate_profile(&root.to_string_lossy(), profile) else {
+            continue;
+        };
+        let profile_dir = root.join(profile);
+        let mut developer_mode = false;
+        let mut extension_installed = false;
+        let mut extension_version: Option<String> = None;
+        let mut tampermonkey_installed = false;
+        let mut tampermonkey_allow_user_scripts = false;
+
+        for pref_name in ["Preferences", "Secure Preferences"] {
+            let Some(doc) = std::fs::read(profile_dir.join(pref_name))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            else {
+                continue;
+            };
+            if doc["extensions"]["ui"]["developer_mode"].as_bool() == Some(true) {
+                developer_mode = true;
+            }
+            let Some(settings) = doc["extensions"]["settings"].as_object() else {
+                continue;
+            };
+            for (ext_id, ext_info) in settings {
+                let disabled = ext_info["disable_reasons"]
+                    .as_array()
+                    .is_some_and(|a| !a.is_empty());
+                if ext_id == "dhdgffkkebhmkfjojejmpbldmpobfkfo" && !disabled {
+                    tampermonkey_installed = true;
+                    if ext_info["allow_user_scripts"].as_bool() == Some(true) {
+                        tampermonkey_allow_user_scripts = true;
+                    }
+                }
+                if !disabled && ext_info["location"].as_i64() == Some(4) {
+                    let raw_path = ext_info["path"].as_str().unwrap_or_default();
+                    let norm_path = normalize_ext_path(raw_path);
+                    let name_matches = ext_info["manifest"]["name"]
+                        .as_str()
+                        .is_some_and(|n| n.contains("Flow2API"));
+                    let path_matches = !norm_path.is_empty()
+                        && (norm_path == expected_ext
+                            || norm_path.ends_with("/dev.flow2api.desktop/chrome-extension"));
+                    if name_matches || path_matches {
+                        extension_installed = true;
+                        let detected_ver = ext_info["service_worker_registration_info"]["version"]
+                            .as_str()
+                            .or_else(|| ext_info["manifest"]["version"].as_str())
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                std::fs::read(Path::new(raw_path).join("manifest.json"))
+                                    .ok()
+                                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                                    .and_then(|m| m["version"].as_str().map(str::to_owned))
+                            });
+                        if detected_ver.is_some() {
+                            extension_version = detected_ver;
+                        }
+                    }
+                }
+            }
+        }
+
+        profiles.push(ChromeProfileInfo {
+            data_dir: canonical_root.to_string_lossy().into_owned(),
+            profile: profile.clone(),
+            name: info["name"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(profile)
+                .into(),
+            email: info["user_name"].as_str().unwrap_or_default().into(),
+            gaia_name: info["gaia_name"].as_str().unwrap_or_default().into(),
+            is_last_used: profile == last_used,
+            developer_mode,
+            extension_installed,
+            extension_version,
+            tampermonkey_installed,
+            tampermonkey_allow_user_scripts,
+        });
+    }
+    profiles.sort_by(|a, b| {
+        b.extension_installed
+            .cmp(&a.extension_installed)
+            .then(b.is_last_used.cmp(&a.is_last_used))
+            .then((a.profile != "Default").cmp(&(b.profile != "Default")))
+            .then(a.name.cmp(&b.name))
+            .then(a.profile.cmp(&b.profile))
+    });
+    profiles
+}
+
+/// Launch a URL in the user's real everyday Chrome (optionally targeting a specific `--profile-directory`),
+/// NEVER passing `--user-data-dir` or `--remote-debugging-port`.
+pub fn open_in_chrome_profile(
+    configured_exe: &str,
+    profile_dir: Option<&str>,
+    url: &str,
+) -> Result<bool> {
+    let allowed_local_userscript = url.starts_with("http://127.0.0.1:")
+        && url.ends_with("/extension/flow2api-flow-login-sync.user.js");
+    let allowed_url = url.starts_with("chrome://extensions")
+        || url.starts_with("https://flow.google.com/")
+        || url.starts_with("https://www.flowmusic.app/")
+        || url.starts_with("https://flowmusic.app/")
+        || allowed_local_userscript;
+    if !allowed_url {
+        bail!("不允许打开未知地址");
+    }
+    if let Some(p) = profile_dir.map(str::trim).filter(|s| !s.is_empty()) {
+        if p == "." || p == ".." || p.contains(['/', '\\']) || p.starts_with('-') {
+            bail!("Chrome 配置目录名无效");
+        }
+    }
+    let Ok(exe) = executable(configured_exe) else {
+        return Ok(false);
+    };
+    let mut cmd = std::process::Command::new(exe);
+    if let Some(p) = profile_dir.map(str::trim).filter(|s| !s.is_empty()) {
+        cmd.arg(format!("--profile-directory={p}"));
+    }
+    cmd.arg(url);
+    Ok(cmd.spawn().is_ok())
+}
+
+/// Reveal `chrome-extension` folder highlighted in Explorer / Finder so the user can drag-and-drop it directly onto `chrome://extensions/`.
+pub fn reveal_extension_folder(dir: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        return std::process::Command::new("explorer.exe")
+            .arg(format!("/select,{}", dir.display()))
+            .spawn()
+            .is_ok();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return std::process::Command::new("open")
+            .arg("-R")
+            .arg(dir)
+            .spawn()
+            .is_ok();
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        let parent = dir.parent().unwrap_or(dir);
+        return std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .is_ok();
+    }
 }
 
 fn profiles_in(root: &Path) -> Vec<BrowserProfile> {
@@ -648,6 +870,68 @@ mod tests {
         assert_eq!(profiles[0].profile, "Profile 1");
         std::fs::write(dir.path().join("Local State"), "invalid")?;
         assert!(profiles_in(dir.path()).is_empty());
+        Ok(())
+    }
+    #[test]
+    fn inspect_chrome_profiles_reads_extension_and_tampermonkey_state() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let ext_dir = dir.path().join("dev.flow2api.desktop/chrome-extension");
+        std::fs::create_dir_all(&ext_dir)?;
+        std::fs::write(ext_dir.join("manifest.json"), r#"{"version":"0.4.1"}"#)?;
+
+        let p6 = dir.path().join("Profile 6");
+        std::fs::create_dir(&p6)?;
+        std::fs::write(p6.join("Preferences"), "{}")?;
+        std::fs::write(
+            p6.join("Secure Preferences"),
+            serde_json::to_vec(&json!({
+                "extensions": {
+                    "ui": {"developer_mode": true},
+                    "settings": {
+                        "pkejlnbmdghjngefphmnekkoancbnpli": {
+                            "location": 4,
+                            "path": ext_dir.to_string_lossy(),
+                            "disable_reasons": [],
+                            "service_worker_registration_info": {"version": "0.4.1"}
+                        },
+                        "dhdgffkkebhmkfjojejmpbldmpobfkfo": {
+                            "disable_reasons": [],
+                            "allow_user_scripts": null
+                        }
+                    }
+                }
+            }))?,
+        )?;
+        let def = dir.path().join("Default");
+        std::fs::create_dir(&def)?;
+        std::fs::write(def.join("Preferences"), "{}")?;
+
+        std::fs::write(
+            dir.path().join("Local State"),
+            serde_json::to_vec(&json!({
+                "profile": {
+                    "last_used": "Profile 6",
+                    "info_cache": {
+                        "Default": {"name": "Main", "user_name": "main@example.test"},
+                        "Profile 6": {"name": "Ultra", "user_name": "ultra@example.test", "gaia_name": "Ultra User"}
+                    }
+                }
+            }))?,
+        )?;
+
+        let inspected = inspect_chrome_profiles_in(dir.path(), &ext_dir);
+        assert_eq!(inspected.len(), 2);
+        assert_eq!(inspected[0].profile, "Profile 6");
+        assert_eq!(inspected[0].email, "ultra@example.test");
+        assert!(inspected[0].is_last_used);
+        assert!(inspected[0].developer_mode);
+        assert!(inspected[0].extension_installed);
+        assert_eq!(inspected[0].extension_version.as_deref(), Some("0.4.1"));
+        assert!(inspected[0].tampermonkey_installed);
+        assert!(!inspected[0].tampermonkey_allow_user_scripts);
+
+        assert_eq!(inspected[1].profile, "Default");
+        assert!(!inspected[1].extension_installed);
         Ok(())
     }
     #[test]
